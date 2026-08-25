@@ -1,22 +1,10 @@
 # Neopets Darthy Prime
 
-**Unified browser extension** that brings together your three userscripts with zero functionality lost:
+Extension I created to keep track of my shop, Pet stats and spending. added a few extra tracking features like tracking stamp album. The notifications system to track pet training times and neopets notifications in general. Less clunky I feel and more quality of life if anything to help whoever.
 
-1. **Stats Tracker (Kitchen + Lab)** – v1.15 logic  
-   Tracks Level / HP / Strength / Defence gains from Kitchen, Lab, Inventory, SDB, Scratchcards, Training Schools, Faerie Quests + daily log. Injects into the profile dropdown.
+Chrome extension. May work with other browsers but can't say they will 100%
 
-2. **Notification Prime** – v4.8.3 logic  
-   Training Helper Plus (smart quick-start buttons, complete single/all courses, Item Grabber + auto SDB withdraw + auto-pay), floating 🛎️ notification bell for finished trainings & native Neopets alerts, Clear Notifications button.
-
-3. **Stamp Album Helper**  
-   Fetches Jellyneo data, shows missing stamps section, greyscale placeholders, click-for-info, double-click SSW search (if Premium).
-
-4. **Shop History Profit Tracker** (new in 1.1.0)  
-   On your Shop → Sales History page the "Clear Sales History" button becomes **"Process Shop History"**.  
-   Clicking it adds every listed sale price to a running total, then clears the history so you never double-count.  
-   Total is shown under the table and also in the profile dropdown + extension popup.
-
-## Installation (Chrome / Edge / Brave / Opera)
+No stats are lost of updates
 
 1. Download / unzip this folder.
 2. Open `chrome://extensions` (or `edge://extensions` etc.).
