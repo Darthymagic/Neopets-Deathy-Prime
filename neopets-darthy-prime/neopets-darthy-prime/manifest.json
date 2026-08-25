@@ -1,0 +1,73 @@
+{
+  "manifest_version": 3,
+  "name": "Neopets Darthy Prime",
+  "version": "1.4.12",
+  "description": "Neopets Darthy Prime: Stats, Notifications, Shop tools, Shop Mimic, ShopWiz Pro, Home pets grid, Random Events.",
+  "author": "Darthy",
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://www.neopets.com/*",
+    "https://items.jellyneo.net/*",
+    "https://pets.neopets.com/*",
+    "https://images.neopets.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.neopets.com/*"
+      ],
+      "js": [
+        "scripts/jquery.min.js",
+        "scripts/storage-polyfill.js",
+        "scripts/setup-modal.js",
+        "scripts/stats-tracker.js",
+        "scripts/notification-prime.js",
+        "scripts/stamp-helper.js",
+        "scripts/shop-profit.js",
+        "scripts/shop-mimic.js",
+        "scripts/random-events.js",
+        "scripts/home-pets-grid.js",
+        "scripts/shopwiz-pro.js",
+        "scripts/content-main.js"
+      ],
+      "css": [
+        "styles/darthy-prime.css"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Neopets Darthy Prime",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*"
+      ],
+      "matches": [
+        "https://www.neopets.com/*"
+      ]
+    }
+  ]
+}
