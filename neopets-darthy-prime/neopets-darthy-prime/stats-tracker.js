@@ -503,19 +503,24 @@
     section.innerHTML = `
       <div style="border-top:1px solid #4a4a6a;margin:10px 12px 6px;"></div>
       <div class="nav-profile-dropdown-text" style="padding:4px 12px 10px;line-height:1.5;">
-        <div style="font-weight:bold;color:#7dd3fc;margin-bottom:5px;">Stats Tracker · ${PET_NAME}</div>
-        <div>Level: <span id="stat-level">0</span></div>
-        <div>HP: <span id="stat-hp">0</span></div>
-        <div>Strength: <span id="stat-strength">0</span></div>
-        <div>Defence: <span id="stat-defence">0</span></div>
-        <div style="margin-top:6px;color:#7dd3fc;font-size:12px;" id="stat-days">Tracking for 1 Day</div>
-        <div style="margin-top:8px;"><a href="javascript:void(0)" id="reset-stats-btn" style="color:#f87171;font-size:11px;">Reset Totals</a></div>
+        <div id="darthy-drop-stats-h" style="font-weight:bold;color:#7dd3fc;margin-bottom:5px;cursor:pointer;user-select:none;">Stats Tracker · ${PET_NAME} <span class="darthy-caret">▾</span></div>
+        <div id="darthy-drop-stats-b">
+          <div>Level: <span id="stat-level">0</span></div>
+          <div>HP: <span id="stat-hp">0</span></div>
+          <div>Strength: <span id="stat-strength">0</span></div>
+          <div>Defence: <span id="stat-defence">0</span></div>
+          <div style="margin-top:6px;color:#7dd3fc;font-size:12px;" id="stat-days">Tracking for 1 Day</div>
+          <div style="margin-top:8px;"><a href="javascript:void(0)" id="reset-stats-btn" style="color:#f87171;font-size:11px;">Reset Totals</a></div>
+        </div>
+        <div id="shop-profit-anchor"></div>
         <div style="border-top:1px solid #4a4a6a;margin:12px 0 8px;"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
-          <div style="font-weight:bold;color:#7dd3fc;font-size:12px;">Today's Log</div>
+          <div id="darthy-drop-log-h" style="font-weight:bold;color:#7dd3fc;font-size:12px;cursor:pointer;user-select:none;">Today's Log <span class="darthy-caret">▾</span></div>
           <a href="javascript:void(0)" id="copy-log-btn" style="color:#7dd3fc;font-size:11px;white-space:nowrap;">Copy Log</a>
         </div>
-        <div id="stats-log" style="max-height:80px;overflow-y:auto;font-size:11px;line-height:1.4;color:#d1d5db;white-space:pre-wrap;margin-bottom:2px;background:rgba(0,0,0,0.25);padding:6px 8px;border-radius:4px;"></div>
+        <div id="darthy-drop-log-b">
+          <div id="stats-log" style="max-height:80px;overflow-y:auto;font-size:11px;line-height:1.4;color:#d1d5db;white-space:pre-wrap;margin-bottom:2px;background:rgba(0,0,0,0.25);padding:6px 8px;border-radius:4px;"></div>
+        </div>
       </div>`;
 
     signOutLink.parentNode.insertBefore(section, signOutLink.nextSibling);
@@ -541,8 +546,36 @@
       });
     });
 
+    bindDrop('darthy-drop-stats', 'dp_drop_stats');
+    bindDrop('darthy-drop-log', 'dp_drop_log');
     updateDropdownStats();
     return true;
+  }
+
+  function dropOpen(key, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      if (v === '0') return false;
+      if (v === '1') return true;
+    } catch (_) {}
+    return fallback !== false;
+  }
+  function bindDrop(id, key) {
+    const h = document.getElementById(id + '-h');
+    const b = document.getElementById(id + '-b');
+    if (!h || !b) return;
+    const apply = (open) => {
+      b.style.display = open ? 'block' : 'none';
+      const c = h.querySelector('.darthy-caret');
+      if (c) c.textContent = open ? '▾' : '▸';
+    };
+    apply(dropOpen(key, true));
+    h.addEventListener('click', e => {
+      e.preventDefault();
+      const open = b.style.display === 'none';
+      apply(open);
+      try { localStorage.setItem(key, open ? '1' : '0'); } catch (_) {}
+    });
   }
 
   function updateDropdownStats() {

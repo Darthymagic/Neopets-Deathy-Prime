@@ -180,28 +180,46 @@
     const section = document.getElementById('neopets-stats-section');
     if (!section) return;
 
-    // Prefer inserting after #stat-days
-    const daysEl = document.getElementById('stat-days');
-    if (!daysEl) return;
+    const anchor = document.getElementById('shop-profit-anchor') || document.getElementById('stat-days');
+    if (!anchor) return;
 
     let row = document.getElementById('shop-profit-row');
     if (!row) {
       row = document.createElement('div');
       row.id = 'shop-profit-row';
       row.style.cssText = 'margin-top:8px;padding-top:6px;border-top:1px solid #4a4a6a;';
-      daysEl.parentNode.insertBefore(row, daysEl.nextSibling);
+      if (anchor.id === 'shop-profit-anchor') anchor.appendChild(row);
+      else anchor.parentNode.insertBefore(row, anchor.nextSibling);
     }
 
     const shopName = getShopName();
-    const nameLine = shopName
-      ? `<div style="font-weight:bold;color:#fbbf24;margin-bottom:4px;font-size:12px;">${escapeHtml(shopName)}</div>`
-      : `<div style="font-weight:bold;color:#fbbf24;margin-bottom:3px;font-size:12px;">Shop Profit</div>`;
-
+    const title = shopName || 'Shop Profit';
     row.innerHTML = `
-      ${nameLine}
-      <div style="font-size:12px;">Profit: <span id="shop-profit-value" style="color:#4ade80;font-weight:bold;">${formatNP(getProfit())}</span></div>
-      <div style="font-size:12px;margin-top:3px;">Spending: <span id="shop-spend-value" style="color:#f87171;font-weight:bold;">${formatNP(getSpend())}</span></div>
+      <div id="darthy-drop-fin-h" style="font-weight:bold;color:#fbbf24;margin-bottom:4px;font-size:12px;cursor:pointer;user-select:none;">${escapeHtml(title)} <span class="darthy-caret">▾</span></div>
+      <div id="darthy-drop-fin-b">
+        <div style="font-size:12px;">Profit: <span id="shop-profit-value" style="color:#4ade80;font-weight:bold;">${formatNP(getProfit())}</span></div>
+        <div style="font-size:12px;margin-top:3px;">Spending: <span id="shop-spend-value" style="color:#f87171;font-weight:bold;">${formatNP(getSpend())}</span></div>
+      </div>
     `;
+    const h = row.querySelector('#darthy-drop-fin-h');
+    const b = row.querySelector('#darthy-drop-fin-b');
+    const apply = (open) => {
+      if (b) b.style.display = open ? 'block' : 'none';
+      const c = h && h.querySelector('.darthy-caret');
+      if (c) c.textContent = open ? '▾' : '▸';
+    };
+    let open = true;
+    try { if (localStorage.getItem('dp_drop_fin') === '0') open = false; } catch (_) {}
+    apply(open);
+    if (h && !h.dataset.bound) {
+      h.dataset.bound = '1';
+      h.addEventListener('click', e => {
+        e.preventDefault();
+        const next = b.style.display === 'none';
+        apply(next);
+        try { localStorage.setItem('dp_drop_fin', next ? '1' : '0'); } catch (_) {}
+      });
+    }
   }
 
   function escapeHtml(s) {

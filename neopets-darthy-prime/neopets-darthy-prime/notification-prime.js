@@ -829,13 +829,247 @@
     if (!bellBadge) return;
     const completed = loadCompleted();
     const native = scanNativeAlerts();
-    const total = completed.length + native.current.length;
+    const rem = getVisibleReminders();
+    const total = completed.length + native.current.length + rem.length;
     if (total > 0) {
       bellBadge.textContent = total > 9 ? '9+' : total;
       bellBadge.style.display = 'inline-block';
     } else {
       bellBadge.style.display = 'none';
     }
+  }
+
+  // ---------- Reminders (NST) ----------
+  const REM_KEY = 'darthy_reminders';
+  const REM_DISMISS_KEY = 'darthy_reminder_dismissed';
+  const REM_ICON = 'https://images.neopets.com/items/boo_spellingbeginners.gif';
+  const REM_SCROLL = 'https://images.neopets.com/neoboards/smilies/scroll.gif';
+  const remOpenedDue = {};
+
+  function remLoad() {
+    try {
+      const g = (typeof GM_getValue === 'function') ? GM_getValue(REM_KEY, null) : null;
+      if (Array.isArray(g)) return g;
+      const raw = localStorage.getItem('dp_' + REM_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) { return []; }
+  }
+  function remSave(list) {
+    try { if (typeof GM_setValue === 'function') GM_setValue(REM_KEY, list); } catch (_) {}
+    try { localStorage.setItem('dp_' + REM_KEY, JSON.stringify(list)); } catch (_) {}
+  }
+  function remDismissed() {
+    try { return JSON.parse(localStorage.getItem(REM_DISMISS_KEY) || '{}'); } catch (_) { return {}; }
+  }
+  function remSetDismissed(map) {
+    try { localStorage.setItem(REM_DISMISS_KEY, JSON.stringify(map)); } catch (_) {}
+  }
+  function nstNow() {
+    const now = new Date();
+    const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+    return new Date(utc - 8 * 60 * 60 * 1000);
+  }
+  function nstDateStr(d) {
+    d = d || nstNow();
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+  function pad2(n) { return String(n).padStart(2, '0'); }
+  function fmtNst(h, m) { return pad2(h) + ':' + pad2(m) + ' NST'; }
+
+  function getVisibleReminders() {
+    const list = remLoad();
+    const now = nstNow();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    const today = nstDateStr(now);
+    const dismissed = remDismissed();
+    const out = [];
+    list.forEach(r => {
+      if (!r || !r.title) return;
+      const tMin = (parseInt(r.hour, 10) || 0) * 60 + (parseInt(r.minute, 10) || 0);
+      const slot = today + '|' + r.id;
+      if (dismissed[slot]) return;
+      let delta = nowMin - tMin; // minutes after target (negative = before)
+      // wrap-aware distance to target
+      let until = tMin - nowMin;
+      if (until > 12 * 60) until -= 24 * 60;
+      if (until < -12 * 60) until += 24 * 60;
+      if (until > 0 && until <= 60) {
+        out.push({ ...r, kind: 'soon', untilMin: until, untilSec: until * 60 - now.getSeconds() });
+      } else if (until <= 0 && until > -60) {
+        out.push({ ...r, kind: 'due', lateMin: -until });
+      }
+    });
+    return out;
+  }
+
+  function dismissVisibleReminders() {
+    const vis = getVisibleReminders();
+    const today = nstDateStr();
+    const dismissed = remDismissed();
+    const list = remLoad();
+    vis.forEach(v => {
+      dismissed[today + '|' + v.id] = 1;
+      if (v.kind === 'due' && !v.permanent) {
+        const rec = list.find(x => x.id === v.id);
+        if (rec) {
+          rec.times = Math.max(0, (parseInt(rec.times, 10) || 1) - 1);
+          rec.lastFired = today;
+        }
+      }
+    });
+    remSave(list.filter(r => r.permanent || (parseInt(r.times, 10) || 0) > 0));
+    remSetDismissed(dismissed);
+  }
+
+  function reminderRowsHtml() {
+    const vis = getVisibleReminders();
+    if (!vis.length) return '';
+    let html = '';
+    vis.forEach(r => {
+      const border = r.kind === 'due' ? '#e74c3c' : '#27ae60';
+      const label = r.kind === 'due' ? 'Reminder' : 'Upcoming reminder';
+      let extra;
+      if (r.kind === 'soon') {
+        const mins = Math.max(0, r.untilMin);
+        extra = `<div class="darthy-rem-cd" data-target="${(parseInt(r.hour,10)||0)*60+(parseInt(r.minute,10)||0)}" style="color:#27ae60;font-weight:bold;font-size:12px;">${mins} min until ${fmtNst(r.hour, r.minute)}</div>`;
+      } else {
+        extra = `<div style="color:#e74c3c;font-size:11px;">Due at ${fmtNst(r.hour, r.minute)}</div>`;
+      }
+      html += `
+        <div style="padding:10px;border-bottom:1px solid #eee;display:flex;gap:10px;align-items:flex-start;">
+          <img src="${REM_ICON}" width="40" height="40" alt="" style="width:40px;height:40px;border-radius:6px;flex-shrink:0;object-fit:contain;background:#fff;border:2.5px solid ${border};box-sizing:border-box;">
+          <div style="flex:1;font-size:13px;">
+            <div style="font-weight:bold;color:#333;">${label}</div>
+            <div style="color:#555;margin:2px 0;">${escapeRem(r.title)}</div>
+            ${extra}
+          </div>
+        </div>`;
+    });
+    return html;
+  }
+
+  function escapeRem(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function tickReminderCountdowns() {
+    if (!panel || panel.style.display !== 'block') return;
+    const now = nstNow();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    panel.querySelectorAll('.darthy-rem-cd').forEach(el => {
+      const tMin = parseInt(el.getAttribute('data-target'), 10) || 0;
+      let until = tMin - nowMin;
+      if (until < 0) until += 24 * 60;
+      const h = Math.floor(until / 60);
+      const m = until % 60;
+      el.textContent = (h > 0 ? h + 'h ' : '') + m + ' min until ' + pad2(Math.floor(tMin / 60)) + ':' + pad2(tMin % 60) + ' NST';
+    });
+  }
+
+  function checkReminders() {
+    const vis = getVisibleReminders();
+    const today = nstDateStr();
+    const newDue = vis.filter(v => v.kind === 'due' && !remOpenedDue[v.id + '|' + today]);
+    if (newDue.length) {
+      newDue.forEach(v => { remOpenedDue[v.id + '|' + today] = true; });
+      showNotificationPanel(true);
+    } else {
+      updateBellBadge();
+      tickReminderCountdowns();
+    }
+  }
+
+  function openReminderSettings() {
+    let modal = document.getElementById('darthy-rem-modal');
+    if (modal) modal.remove();
+    modal = document.createElement('div');
+    modal.id = 'darthy-rem-modal';
+    modal.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:70px 12px 20px;';
+    modal.innerHTML = reminderSettingsHtml();
+    document.body.appendChild(modal);
+    bindReminderSettings(modal);
+  }
+
+  function reminderSettingsHtml(editId) {
+    const list = remLoad();
+    const edit = editId ? list.find(r => r.id === editId) : null;
+    const rows = list.map(r => {
+      const when = fmtNst(r.hour, r.minute);
+      const times = r.permanent ? 'Permanent' : ((parseInt(r.times, 10) || 1) + '×');
+      return `<div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid #eee;font-size:12px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:bold;color:#333;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeRem(r.title)}</div>
+          <div style="color:#888;font-size:11px;">${when} · ${times}</div>
+        </div>
+        <button data-edit="${r.id}" style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:bold;">Edit</button>
+        <button data-del="${r.id}" style="background:#dc2626;color:#fff;border:none;border-radius:5px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:bold;">Delete</button>
+      </div>`;
+    }).join('') || '<div style="color:#888;font-size:12px;padding:8px 0;">No reminders yet.</div>';
+    return `<div style="width:340px;max-width:100%;background:#fff;border:3px solid #4a90e2;border-radius:12px;padding:14px;font-family:Verdana,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.3);max-height:80vh;overflow:auto;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+        <div style="font-weight:bold;color:#4a90e2;font-size:15px;">Reminders</div>
+        <button id="darthy-rem-x" style="border:none;background:none;font-size:18px;cursor:pointer;color:#888;">✕</button>
+      </div>
+      <div style="font-size:11px;color:#666;margin-bottom:8px;">Times use Neopets Standard Time (NST).</div>
+      <input id="rem-title" placeholder="Title" value="${edit ? escapeRem(edit.title) : ''}" style="width:100%;box-sizing:border-box;padding:7px 8px;border:1px solid #ccc;border-radius:6px;margin-bottom:8px;font-size:13px;">
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:13px;">
+        <span>Time NST</span>
+        <input id="rem-hour" type="number" min="0" max="23" value="${edit ? edit.hour : 12}" style="width:56px;padding:6px;border:1px solid #ccc;border-radius:6px;">
+        <span>:</span>
+        <input id="rem-min" type="number" min="0" max="59" value="${edit ? edit.minute : 0}" style="width:56px;padding:6px;border:1px solid #ccc;border-radius:6px;">
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;font-size:13px;">
+        <span>Times</span>
+        <input id="rem-times" type="number" min="1" max="999" value="${edit && !edit.permanent ? (edit.times || 1) : 1}" style="width:64px;padding:6px;border:1px solid #ccc;border-radius:6px;">
+      </div>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin-bottom:10px;cursor:pointer;">
+        <input id="rem-perm" type="checkbox" ${edit && edit.permanent ? 'checked' : ''}> Permanent reminder
+      </label>
+      <input type="hidden" id="rem-edit-id" value="${edit ? edit.id : ''}">
+      <button id="rem-save" style="width:100%;background:#4a90e2;color:#fff;border:none;padding:8px;border-radius:6px;font-weight:bold;cursor:pointer;margin-bottom:10px;">${edit ? 'Save reminder' : 'Add reminder'}</button>
+      <div style="font-weight:bold;color:#4a90e2;font-size:13px;margin:6px 0;">All reminders</div>
+      <div id="rem-list" style="max-height:220px;overflow:auto;">${rows}</div>
+    </div>`;
+  }
+
+  function bindReminderSettings(modal) {
+    const close = () => modal.remove();
+    modal.addEventListener('click', e => { if (e.target === modal) close(); });
+    modal.querySelector('#darthy-rem-x').onclick = close;
+    modal.querySelector('#rem-save').onclick = () => {
+      const title = (modal.querySelector('#rem-title').value || '').trim();
+      if (!title) return alert('Enter a title.');
+      let hour = Math.max(0, Math.min(23, parseInt(modal.querySelector('#rem-hour').value, 10) || 0));
+      let minute = Math.max(0, Math.min(59, parseInt(modal.querySelector('#rem-min').value, 10) || 0));
+      const permanent = !!modal.querySelector('#rem-perm').checked;
+      const times = permanent ? 0 : Math.max(1, parseInt(modal.querySelector('#rem-times').value, 10) || 1);
+      const editId = modal.querySelector('#rem-edit-id').value;
+      const list = remLoad();
+      if (editId) {
+        const rec = list.find(r => r.id === editId);
+        if (rec) Object.assign(rec, { title, hour, minute, times, permanent });
+      } else {
+        list.push({ id: 'r' + Date.now().toString(36), title, hour, minute, times, permanent });
+      }
+      remSave(list);
+      modal.innerHTML = reminderSettingsHtml();
+      bindReminderSettings(modal);
+      updateBellBadge();
+    };
+    modal.querySelectorAll('[data-edit]').forEach(btn => {
+      btn.onclick = () => {
+        modal.innerHTML = reminderSettingsHtml(btn.getAttribute('data-edit'));
+        bindReminderSettings(modal);
+      };
+    });
+    modal.querySelectorAll('[data-del]').forEach(btn => {
+      btn.onclick = () => {
+        remSave(remLoad().filter(r => r.id !== btn.getAttribute('data-del')));
+        modal.innerHTML = reminderSettingsHtml();
+        bindReminderSettings(modal);
+        updateBellBadge();
+      };
+    });
   }
 
   window.showNotificationPanel = function (autoOpen = false) {
@@ -846,10 +1080,14 @@
     const completed = loadCompleted();
     const native = scanNativeAlerts();
 
-    let html = `<h3 style="margin:0 0 12px;color:#4a90e2;font-size:15px;border-bottom:1px solid #eee;padding-bottom:8px;">
-      Notification Prime
-      <button id="neo-panel-close" style="float:right;font-size:18px;border:none;background:none;cursor:pointer;color:#888;">✕</button>
+    const remHtml = reminderRowsHtml();
+
+    let html = `<h3 style="margin:0 0 12px;color:#4a90e2;font-size:15px;border-bottom:1px solid #eee;padding-bottom:8px;display:flex;align-items:center;gap:8px;">
+      <span style="flex:1;">Notification Prime</span>
+      <img id="darthy-rem-btn" src="${REM_SCROLL}" width="22" height="22" title="Reminders" alt="Reminders" style="width:22px;height:22px;cursor:pointer;flex-shrink:0;">
+      <button id="neo-panel-close" style="font-size:18px;border:none;background:none;cursor:pointer;color:#888;">✕</button>
     </h3>`;
+    if (remHtml) html += remHtml;
 
     if (native.current.length > 0) {
       html += `<div style="margin-bottom:10px;">`;
@@ -919,7 +1157,7 @@
       });
     }
 
-    if (!completed.length && Object.keys(active).length === 0 && native.current.length === 0) {
+    if (!completed.length && Object.keys(active).length === 0 && native.current.length === 0 && !remHtml) {
       html += `<p style="text-align:center;color:#888;padding:20px 0;font-size:13px;">No notifications right now.</p>`;
     }
 
@@ -933,12 +1171,15 @@
     if (closeBtn) {
       closeBtn.onclick = () => { panel.style.display = 'none'; };
     }
+    const remBtn = panel.querySelector('#darthy-rem-btn');
+    if (remBtn) remBtn.onclick = (e) => { e.stopPropagation(); openReminderSettings(); };
 
     const clearBtn = panel.querySelector('#clear-notifications-btn');
     if (clearBtn) {
       clearBtn.onclick = () => {
         localStorage.removeItem(LOCAL_COMPLETED);
         localStorage.removeItem(LOCAL_SEEN_ALERTS);
+        dismissVisibleReminders();
         document.querySelectorAll('.alert-x').forEach((el, i) => setTimeout(() => el.click?.(), i * 80));
         setTimeout(() => {
           showNotificationPanel();
@@ -1047,6 +1288,8 @@
         if (loadCompleted().length > 0) showNotificationPanel(true);
         setInterval(checkExpiredTrainings, 25000);
         checkExpiredTrainings();
+        setInterval(checkReminders, 15000);
+        checkReminders();
         handleAutoSDBWithdraw();
         startNativeAlertWatcher();
 
