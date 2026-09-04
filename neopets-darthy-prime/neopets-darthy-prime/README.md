@@ -6,7 +6,7 @@
    Tracks Level / HP / Strength / Defence gains from Kitchen, Lab, Inventory, SDB, Scratchcards, Training Schools, Faerie Quests + daily log. Injects into the profile dropdown.
 
 2. **Notification Prime** – v4.8.3 logic  
-   Training Helper Plus (smart quick-start buttons, complete single/all courses, Item Grabber + auto SDB withdraw + auto-pay), floating 🛎️ notification bell for finished trainings & native Neopets alerts, Clear Notifications button.
+   Training Helper Plus (smart quick-start buttons, complete single/all courses, floating 🛎️ notification bell for finished trainings & native Neopets alerts, Clear Notifications button.
 
 3. **Stamp Album Helper**  
    Fetches Jellyneo data, shows missing stamps section, greyscale placeholders, click-for-info, double-click SSW search (if Premium).
