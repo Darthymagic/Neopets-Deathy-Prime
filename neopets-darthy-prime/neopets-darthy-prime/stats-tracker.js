@@ -62,6 +62,16 @@
     const log = getLog();
     if (log.length && log[log.length - 1] === clean) return;
 
+    if (/^You get 1 Faerie Quest — \+/i.test(clean)) {
+      while (log.length && /^You get 1 Faerie Quest — /i.test(log[log.length - 1]) &&
+             !/You get 1 Faerie Quest — \+/i.test(log[log.length - 1])) {
+        log.pop();
+      }
+    }
+    if (/^You get 1 Faerie Quest — /i.test(clean) && !/\+\d/i.test(clean)) {
+      if (log.some(l => /^You get 1 Faerie Quest — \+/i.test(l))) return;
+    }
+
     log.push(clean);
     if (log.length > 120) log.shift();
     GM_setValue(LOG_KEY, log);
@@ -172,11 +182,54 @@
     });
   }
 
+
+  function processWheelPrize() {
+    const box = document.getElementById('popupRewardContent') || document.getElementById('responseDisplaySuccess');
+    if (!box) return;
+    const style = window.getComputedStyle ? window.getComputedStyle(box) : null;
+    if (style && style.display === 'none') return;
+    const nameEl = document.getElementById('itemName');
+    const msgEl = document.getElementById('spinMessage');
+    const name = (nameEl && nameEl.textContent || '').replace(/\s+/g, ' ').trim();
+    const msg = (msgEl && msgEl.textContent || '').replace(/\s+/g, ' ').trim();
+    const text = (name + ' ' + msg + ' ' + (box.innerText || '')).replace(/\s+/g, ' ').trim();
+    if (!text || text.length < 2) return;
+    const key = 'wheel|' + text.toLowerCase().slice(0, 180);
+    if (processedThisSession.has(key)) return;
+    processedThisSession.add(key);
+
+    const npM = text.match(/([\d,]+)\s*NP\b/i);
+    if (npM) {
+      const amt = parseInt(npM[1].replace(/,/g, ''), 10);
+      if (amt > 0 && window.DarthyPrimeShop && typeof window.DarthyPrimeShop.addProfit === 'function') {
+        window.DarthyPrimeShop.addProfit(amt);
+      }
+      addToLog('Wheel: +' + (amt ? amt.toLocaleString() : npM[1]) + ' NP');
+      return;
+    }
+
+    const pairRe = /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(hit\s*points?|health|endurance|strength|defence|defense|levels?|movement(?:\s+points?)?)/gi;
+    const bits = [];
+    let pm;
+    while ((pm = pairRe.exec(text)) !== null) {
+      const amt = parseAmount(pm[1]);
+      const stat = normalizeStat(pm[2]);
+      if (stat && amt) {
+        addStat(stat, amt);
+        const label = stat === 'hp' ? 'HP' : stat.charAt(0).toUpperCase() + stat.slice(1);
+        bits.push('+' + amt + ' ' + label);
+      }
+    }
+    if (bits.length) addToLog('Wheel: ' + bits.join(', '));
+    else if (name) addToLog('Wheel: ' + name);
+  }
+
   function scanPageForGains() {
     // Never scan while the user is interacting with our own UI
     const trackerUI = document.getElementById('neopets-stats-section');
     if (trackerUI && trackerUI.contains(document.activeElement)) return;
     processInvUse();
+    processWheelPrize();
 
     const bodyText = getScannableText();
     if (!bodyText.toLowerCase().includes(PET_NAME.toLowerCase())) return;
@@ -204,12 +257,7 @@
       if (rewardEl) {
         const rtxt = (rewardEl.textContent || '').replace(/\s+/g, ' ').trim();
         if (/for your efforts/i.test(rtxt)) {
-          const key = 'fq-reward|' + rtxt.toLowerCase();
-          if (!processedThisSession.has(key)) {
-            processedThisSession.add(key);
-            const after = rtxt.replace(/^.*?for your efforts,\s*/i, '');
-            addToLog('You get 1 Faerie Quest — ' + after);
-          }
+          processedThisSession.add('fq-reward|' + rtxt.toLowerCase());
         }
       }
 
@@ -308,7 +356,13 @@
         if (processedThisSession.has(key)) continue;
         processedThisSession.add(key);
 
-        addToLog(isFaerieQuestPage ? ('You get 1 Faerie Quest — ' + matchText) : matchText);
+        if (isFaerieQuestPage) {
+          if ([...processedThisSession].some(k => /^(fyora|battle|light|fire|water|dark|space)-/.test(String(k)))) continue;
+          if (p.stat) addToLog('You get 1 Faerie Quest — +' + (p.amount || 1) + ' ' + (p.stat === 'hp' ? 'HP' : p.stat.charAt(0).toUpperCase() + p.stat.slice(1)));
+          else continue;
+        } else {
+          addToLog(matchText);
+        }
 
         if (p.stat) {
           addStat(p.stat, p.amount || 1);
@@ -328,7 +382,11 @@
       if (processedThisSession.has(key)) continue;
       processedThisSession.add(key);
 
-      addToLog(isFaerieQuestPage ? ('You get 1 Faerie Quest — ' + match[0]) : match[0]);
+      if (isFaerieQuestPage) {
+        if ([...processedThisSession].some(k => /^(fyora|battle|light|fire|water|dark|space)-/.test(String(k)))) continue;
+      } else {
+        addToLog(match[0]);
+      }
 
       const amount1 = parseAmount(match[1]);
       const stat1 = normalizeStat(match[2]);
@@ -614,7 +672,7 @@
                         url.includes('scratch') || url.includes('training') ||
                         url.includes('academy') || url.includes('faerie') ||
                         url.includes('quests') || url.includes('home') || url.includes('quickref') ||
-                        url.includes('petlookup') || url.includes('useobject') || url.includes('/pets');
+                        url.includes('petlookup') || url.includes('useobject') || url.includes('/pets') || url.includes('wheel');
 
     const observer = new MutationObserver(() => {
       processInvUse();
