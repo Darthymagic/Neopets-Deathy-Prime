@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Neopets Darthy Prime",
-  "version": "1.4.12",
+  "version": "1.4.15",
   "description": "Neopets Darthy Prime: Stats, Notifications, Shop tools, Shop Mimic, ShopWiz Pro, Home pets grid, Random Events.",
   "author": "Darthy",
   "permissions": [
@@ -34,6 +34,7 @@
         "scripts/random-events.js",
         "scripts/home-pets-grid.js",
         "scripts/shopwiz-pro.js",
+        "scripts/questlog-premium.js",
         "scripts/content-main.js"
       ],
       "css": [
