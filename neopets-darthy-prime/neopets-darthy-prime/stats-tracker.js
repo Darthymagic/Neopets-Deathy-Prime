@@ -54,23 +54,19 @@
     return GM_getValue(LOG_KEY, []);
   }
 
+  function stripLogPrefix(s) {
+    return String(s || '')
+      .replace(/^(KQ Prize|KQ|Kitchen|lab|Lab Ray|Lab|RE|Wheel|You get 1 Faerie Quest)\s*[:\u2014\-]+\s*/i, '')
+      .trim();
+  }
+
   function addToLog(message) {
     if (!message) return;
-    const clean = message.trim().replace(/\s+/g, ' ');
+    const clean = stripLogPrefix(message.trim().replace(/\s+/g, ' '));
     if (!clean) return;
 
     const log = getLog();
-    if (log.length && log[log.length - 1] === clean) return;
-
-    if (/^You get 1 Faerie Quest — \+/i.test(clean)) {
-      while (log.length && /^You get 1 Faerie Quest — /i.test(log[log.length - 1]) &&
-             !/You get 1 Faerie Quest — \+/i.test(log[log.length - 1])) {
-        log.pop();
-      }
-    }
-    if (/^You get 1 Faerie Quest — /i.test(clean) && !/\+\d/i.test(clean)) {
-      if (log.some(l => /^You get 1 Faerie Quest — \+/i.test(l))) return;
-    }
+    if (log.length && stripLogPrefix(log[log.length - 1]) === clean) return;
 
     log.push(clean);
     if (log.length > 120) log.shift();
@@ -204,7 +200,7 @@
       if (amt > 0 && window.DarthyPrimeShop && typeof window.DarthyPrimeShop.addProfit === 'function') {
         window.DarthyPrimeShop.addProfit(amt);
       }
-      addToLog('Wheel: +' + (amt ? amt.toLocaleString() : npM[1]) + ' NP');
+      addToLog('+' + (amt ? amt.toLocaleString() : npM[1]) + ' NP');
       return;
     }
 
@@ -220,8 +216,8 @@
         bits.push('+' + amt + ' ' + label);
       }
     }
-    if (bits.length) addToLog('Wheel: ' + bits.join(', '));
-    else if (name) addToLog('Wheel: ' + name);
+    if (bits.length) addToLog('' + bits.join(', '));
+    else if (name) addToLog('' + name);
   }
 
   function scanPageForGains() {
@@ -266,7 +262,7 @@
         const key = 'fyora-alot';
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
-          addToLog('You get 1 Faerie Quest — +2 Level, +5 HP, +5 Strength');
+          addToLog('+2 Level, +5 HP, +5 Strength');
           addStat('level', 2);
           addStat('hp', 5);
           addStat('strength', 5);
@@ -280,7 +276,7 @@
           const key = 'battle-faerie';
           if (!processedThisSession.has(key)) {
             processedThisSession.add(key);
-            addToLog('You get 1 Faerie Quest — +3 HP, +3 Strength, +3 Defence');
+            addToLog('+3 HP, +3 Strength, +3 Defence');
             addStat('hp', 3);
             addStat('strength', 3);
             addStat('defence', 3);
@@ -293,7 +289,7 @@
         const key = 'light-faerie';
         if (!processedThisSession.has(key) && /gains?|increased|levels?/i.test(lower)) {
           processedThisSession.add(key);
-          addToLog('You get 1 Faerie Quest — +2 Level');
+          addToLog('+2 Level');
           addStat('level', 2);
         }
       }
@@ -303,7 +299,7 @@
         const key = 'fire-faerie';
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
-          addToLog('You get 1 Faerie Quest — +3 Strength');
+          addToLog('+3 Strength');
           addStat('strength', 3);
         }
       }
@@ -313,7 +309,7 @@
         const key = 'water-faerie';
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
-          addToLog('You get 1 Faerie Quest — +3 Defence');
+          addToLog('+3 Defence');
           addStat('defence', 3);
         }
       }
@@ -323,7 +319,7 @@
         const key = 'dark-faerie';
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
-          addToLog('You get 1 Faerie Quest — +3 HP');
+          addToLog('+3 HP');
           addStat('hp', 3);
         }
       }
@@ -333,7 +329,7 @@
         const key = 'space-faerie';
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
-          addToLog('You get 1 Faerie Quest — +5 Level');
+          addToLog('+5 Level');
           addStat('level', 5);
         }
       }
@@ -358,7 +354,7 @@
 
         if (isFaerieQuestPage) {
           if ([...processedThisSession].some(k => /^(fyora|battle|light|fire|water|dark|space)-/.test(String(k)))) continue;
-          if (p.stat) addToLog('You get 1 Faerie Quest — +' + (p.amount || 1) + ' ' + (p.stat === 'hp' ? 'HP' : p.stat.charAt(0).toUpperCase() + p.stat.slice(1)));
+          if (p.stat) addToLog('+' + (p.amount || 1) + ' ' + (p.stat === 'hp' ? 'HP' : p.stat.charAt(0).toUpperCase() + p.stat.slice(1)));
           else continue;
         } else {
           addToLog(matchText);
@@ -506,7 +502,7 @@
       // Strip chef lead-in if it somehow got glued to a prize line
       const cleaned = text.replace(/The Chef waves his hands,? and you may collect your prize\.?\s*/gi, '').trim();
       if (!cleaned) return;
-      addToLog('KQ Prize: ' + cleaned);
+      addToLog(cleaned);
     });
   }
 
@@ -519,14 +515,14 @@
 
       const lower = text.toLowerCase();
       if (lower.includes('movement')) {
-        addToLog('lab: ' + text);
+        addToLog(text);
         processedThisSession.add(text);
         return;
       }
 
       const match = text.match(/(?:he|she)\s+(gains|loses)\s+(\d+|one|two|three|four|five|six)\s+(?:maximum\s+)?(strength|defence|defense|hit\s*points?|health|endurance|levels?)/i);
       if (!match) {
-        addToLog('lab: ' + text);
+        addToLog(text);
         processedThisSession.add(text);
         return;
       }
@@ -542,7 +538,7 @@
 
       const delta = action === 'gains' ? amount : -amount;
       addStat(stat, delta);
-      addToLog('lab: ' + PET_NAME + ' ' + action + ' ' + amount + ' ' + (stat === 'hp' ? 'hit points' : stat));
+      addToLog(PET_NAME + ' ' + action + ' ' + amount + ' ' + (stat === 'hp' ? 'hit points' : stat));
       processedThisSession.add(text);
     });
   }
@@ -597,7 +593,7 @@
       e.preventDefault();
       const log = getLog();
       if (!log.length) return alert('Log is empty today.');
-      navigator.clipboard.writeText(log.join('\n')).then(() => {
+      navigator.clipboard.writeText(log.map(stripLogPrefix).filter(Boolean).join('\n')).then(() => {
         const btn = document.getElementById('copy-log-btn');
         btn.textContent = 'Copied!';
         setTimeout(() => btn.textContent = 'Copy Log', 1500);
@@ -659,7 +655,7 @@
     const logEl = document.getElementById('stats-log');
     if (logEl) {
       const log = getLog();
-      logEl.textContent = log.length ? log.join('\n') : 'No gains yet today.';
+      logEl.textContent = log.length ? log.map(stripLogPrefix).filter(Boolean).join('\n') : 'No gains yet today.';
       logEl.style.color = log.length ? '#d1d5db' : '#6b7280';
     }
   }

@@ -81,7 +81,7 @@
           window.DarthyPrimeShop.refreshUI && window.DarthyPrimeShop.refreshUI();
         }
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-          window.DarthyPrimeStats.addToLog('RE: +' + amount.toLocaleString() + ' NP');
+          window.DarthyPrimeStats.addToLog('+' + amount.toLocaleString() + ' NP');
         }
         handled = true;
       }
@@ -98,7 +98,7 @@
           window.DarthyPrimeShop.refreshUI && window.DarthyPrimeShop.refreshUI();
         }
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-          window.DarthyPrimeStats.addToLog('RE: −' + amount.toLocaleString() + ' NP');
+          window.DarthyPrimeStats.addToLog('−' + amount.toLocaleString() + ' NP');
         }
         handled = true;
       }
@@ -116,7 +116,7 @@
           window.DarthyPrimeStats.addStat(stat, action * amount);
         }
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-          window.DarthyPrimeStats.addToLog('RE: ' + (action > 0 ? '+' : '−') + amount + ' ' + stat);
+          window.DarthyPrimeStats.addToLog((action > 0 ? '+' : '−') + amount + ' ' + stat);
         }
         handled = true;
       }
@@ -126,7 +126,7 @@
     const itemM = text.match(/(?:you (?:find|found|receive[ds]?|get|got|are given)|gives? you)\s+(?:an?\s+)?([A-Z][^.!?\n]{2,60}?)(?:[.!?]|$)/);
     if (itemM && !/NP/i.test(itemM[1])) {
       if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-        window.DarthyPrimeStats.addToLog('RE: ' + itemM[1].trim());
+        window.DarthyPrimeStats.addToLog(itemM[1].trim());
       }
       handled = true;
     }
