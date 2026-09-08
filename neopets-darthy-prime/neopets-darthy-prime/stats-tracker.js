@@ -86,7 +86,14 @@
   function addStat(stat, amount) {
     if (!stats.hasOwnProperty(stat)) return;
     stats[stat] += amount;
-    saveStats();
+    if (typeof GM_addStat === 'function') {
+      GM_addStat(STORAGE_KEY, stat, amount).then((s) => {
+        if (s && typeof s === 'object') stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, s);
+        updateDropdownStats();
+      }).catch(() => saveStats());
+    } else {
+      saveStats();
+    }
     console.log(`%c[DarthyPrime Stats] ${stat} ${amount > 0 ? '+' : ''}${amount} → now ${stats[stat]}`, 'color: #4ade80; font-weight: bold');
   }
 
@@ -134,6 +141,8 @@
   function processInvUse() {
     const boxes = document.querySelectorAll('#invResult, .invResult, .togglePopup__2020.invResult');
     boxes.forEach(box => {
+      const visible = box.offsetParent !== null && (!window.getComputedStyle || getComputedStyle(box).display !== 'none');
+      if (!visible) return;
       const text = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
       if (!text || text.length < 8) return;
       if (!new RegExp(PET_NAME, 'i').test(text)) return;
@@ -672,6 +681,7 @@
 
     const observer = new MutationObserver(() => {
       processInvUse();
+      processWheelPrize();
       if (!interesting) return;
       processKitchen();
       processLab();
@@ -681,14 +691,42 @@
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
     setInterval(() => {
+      processInvUse();
+      processWheelPrize();
+      if (!interesting) return;
       processKitchen();
       processLab();
       scanPageForGains();
-    }, 700);
+    }, 600);
 
+    processInvUse();
+    processWheelPrize();
     processKitchen();
     processLab();
     scanPageForGains();
+
+    window.addEventListener('darthy-storage-changed', (ev) => {
+      const ch = ev && ev.detail;
+      if (!ch || !STORAGE_KEY || !ch[STORAGE_KEY]) return;
+      const next = ch[STORAGE_KEY].newValue;
+      if (next && typeof next === 'object') {
+        stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, next);
+        updateDropdownStats();
+      }
+    });
+
+    setInterval(() => {
+      const boxes = document.querySelectorAll('#invResult, .invResult, .togglePopup__2020.invResult');
+      let any = false;
+      boxes.forEach((box) => {
+        if (box.offsetParent !== null && (!window.getComputedStyle || getComputedStyle(box).display !== 'none')) any = true;
+      });
+      if (!any) {
+        [...processedThisSession].forEach((k) => {
+          if (String(k).indexOf('invuse|') === 0) processedThisSession.delete(k);
+        });
+      }
+    }, 1200);
 
     console.log('%c[DarthyPrime Stats] Active – scanning for gains', 'color:#7dd3fc;font-weight:bold');
   }

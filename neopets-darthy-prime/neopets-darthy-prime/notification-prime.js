@@ -66,36 +66,54 @@
 
   function parseTimeMatch(str) {
     if (!str) return null;
-    const m = String(str).match(/(\d+)\s*hrs?,\s*(\d+)\s*minutes?,\s*(\d+)\s*seconds?/i);
+    const m = String(str).match(/(\d+)\s*hrs?,\s*(\d+)\s*minutes?(?:,\s*(\d+)\s*seconds?)?/i);
     if (!m) return null;
-    return timeToEnd(m[1], m[2], m[3]);
+    return timeToEnd(m[1], m[2], m[3] || 0);
+  }
+
+  function isStruckTimeEl(el) {
+    if (!el) return false;
+    if (el.closest && el.closest('s, strike, del, .strikethrough')) return true;
+    try {
+      const st = window.getComputedStyle(el);
+      if (st && String(st.textDecorationLine || st.textDecoration || '').indexOf('line-through') !== -1) return true;
+    } catch (_) {}
+    return false;
   }
 
   // Training Fortune Cookie strikes through the original time and shows the
-  // discounted remaining time in a following <b>. Use the reduced time.
+  // discounted remaining time. Always use the shortest remaining time.
   function parseTrainingTime(blockText, element) {
-    const html = (element && element.innerHTML) || '';
-    const hasCookie = /strikethrough|<s[\s>]|<strike|<del[\s>]/i.test(html) ||
-      /strikethrough|<s[\s>]|<strike|<del[\s>]/i.test(blockText || '');
-
-    if (element) {
-      const bolds = Array.from(element.querySelectorAll('b'));
-      const reduced = bolds.filter(b => {
-        const wrap = b.closest('.strikethrough, s, strike, del');
-        return !wrap;
+    const found = [];
+    const root = element || null;
+    if (root) {
+      const nodes = [root].concat(Array.from(root.querySelectorAll('b, span, font, td, div')));
+      nodes.forEach((el) => {
+        if (isStruckTimeEl(el)) return;
+        const t = parseTimeMatch(el.textContent || '');
+        if (t) found.push(t);
       });
-      const pick = reduced.length ? reduced[reduced.length - 1] : null;
-      const fromEl = parseTimeMatch(pick && pick.textContent);
-      if (fromEl) return fromEl;
+      const struck = Array.from(root.querySelectorAll('s, strike, del, .strikethrough')).concat(
+        nodes.filter(isStruckTimeEl)
+      );
+      if (struck.length) {
+        const live = [];
+        nodes.forEach((el) => {
+          if (isStruckTimeEl(el)) return;
+          const t = parseTimeMatch(el.textContent || '');
+          if (t) live.push(t);
+        });
+        if (live.length) return Math.min.apply(null, live);
+      }
     }
 
-    const re = /(\d+)\s*hrs?,\s*(\d+)\s*minutes?,\s*(\d+)\s*seconds?/gi;
+    const re = /(\d+)\s*hrs?,\s*(\d+)\s*minutes?(?:,\s*(\d+)\s*seconds?)?/gi;
     const all = [];
     let m;
-    while ((m = re.exec(blockText || '')) !== null) all.push(m);
+    while ((m = re.exec(blockText || '')) !== null) all.push(timeToEnd(m[1], m[2], m[3] || 0));
+    if (found.length) return Math.min.apply(null, found);
     if (!all.length) return null;
-    const use = (hasCookie && all.length > 1) ? all[all.length - 1] : all[0];
-    return timeToEnd(use[1], use[2], use[3]);
+    return Math.min.apply(null, all);
   }
 
   function classifyAlertIcon(imgSrc, typeText, messageText, extraContext) {

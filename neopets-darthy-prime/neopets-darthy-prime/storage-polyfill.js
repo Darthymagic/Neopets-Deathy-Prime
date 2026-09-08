@@ -12,15 +12,34 @@
 
   const cache = {};
   let ready = false;
+  function chromeAlive() {
+    try { return !!(typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id && chrome.storage && chrome.storage.local); }
+    catch (_) { return false; }
+  }
   const readyPromise = (async () => {
     try {
-      const all = await chrome.storage.local.get(null);
-      Object.assign(cache, all || {});
-    } catch (e) {
-      console.warn('[DarthyPrime] storage load failed', e);
-    }
+      if (chromeAlive()) {
+        const all = await chrome.storage.local.get(null);
+        Object.assign(cache, all || {});
+      }
+    } catch (_) {}
     ready = true;
   })();
+
+  try {
+    if (chromeAlive() && chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes) return;
+        Object.keys(changes).forEach((k) => {
+          if (Object.prototype.hasOwnProperty.call(changes[k], 'newValue')) cache[k] = changes[k].newValue;
+          else delete cache[k];
+        });
+        try {
+          window.dispatchEvent(new CustomEvent('darthy-storage-changed', { detail: changes }));
+        } catch (_) {}
+      });
+    }
+  } catch (_) {}
 
   // Sync-style after ready (returns from cache). Callers that need guarantee
   // should await DarthyPrimeStorage.ready
@@ -28,20 +47,71 @@
     if (Object.prototype.hasOwnProperty.call(cache, key)) {
       return cache[key];
     }
+    try {
+      const raw = localStorage.getItem('dp_' + key);
+      if (raw !== null) return JSON.parse(raw);
+    } catch (_) {}
     return defaultValue;
+  }
+
+  function GM_addValue(key, amount) {
+    amount = Number(amount) || 0;
+    if (!amount) return Promise.resolve(Number(GM_getValue(key, 0)) || 0);
+    return new Promise((resolve) => {
+      const fallback = () => {
+        const t = (Number(GM_getValue(key, 0)) || 0) + amount;
+        GM_setValue(key, t);
+        resolve(t);
+      };
+      if (!chromeAlive()) return fallback();
+      try {
+        chrome.runtime.sendMessage({ type: 'storage-add', key, amount }, (resp) => {
+          if (chrome.runtime.lastError || !resp || typeof resp.value !== 'number') return fallback();
+          cache[key] = resp.value;
+          resolve(resp.value);
+        });
+      } catch (_) { fallback(); }
+    });
+  }
+
+  function GM_addStat(key, stat, amount) {
+    amount = Number(amount) || 0;
+    return new Promise((resolve) => {
+      const fallback = () => {
+        const cur = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, GM_getValue(key, {}) || {});
+        if (Object.prototype.hasOwnProperty.call(cur, stat)) cur[stat] += amount;
+        GM_setValue(key, cur);
+        resolve(cur);
+      };
+      if (!chromeAlive()) return fallback();
+      try {
+        chrome.runtime.sendMessage({ type: 'storage-add-stat', key, stat, amount }, (resp) => {
+          if (chrome.runtime.lastError || !resp || !resp.stats) return fallback();
+          cache[key] = resp.stats;
+          resolve(resp.stats);
+        });
+      } catch (_) { fallback(); }
+    });
   }
 
   function GM_setValue(key, value) {
     cache[key] = value;
-    // Fire-and-forget persist
-    chrome.storage.local.set({ [key]: value }).catch(err => {
-      console.warn('[DarthyPrime] setValue failed', key, err);
-    });
+    try { localStorage.setItem('dp_' + key, JSON.stringify(value)); } catch (_) {}
+    if (!chromeAlive()) return;
+    try {
+      const p = chrome.storage.local.set({ [key]: value });
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (_) {}
   }
 
   function GM_deleteValue(key) {
     delete cache[key];
-    chrome.storage.local.remove(key).catch(() => {});
+    try { localStorage.removeItem('dp_' + key); } catch (_) {}
+    if (!chromeAlive()) return;
+    try {
+      const p = chrome.storage.local.remove(key);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch (_) {}
   }
 
   // Expose a ready promise + helpers
@@ -53,9 +123,12 @@
     remove: GM_deleteValue,
     // Force reload from chrome.storage
     reload: async () => {
-      const all = await chrome.storage.local.get(null);
-      Object.keys(cache).forEach(k => delete cache[k]);
-      Object.assign(cache, all || {});
+      if (!chromeAlive()) return;
+      try {
+        const all = await chrome.storage.local.get(null);
+        Object.keys(cache).forEach(k => delete cache[k]);
+        Object.assign(cache, all || {});
+      } catch (_) {}
     }
   };
 
@@ -63,6 +136,8 @@
   global.GM_getValue = GM_getValue;
   global.GM_setValue = GM_setValue;
   global.GM_deleteValue = GM_deleteValue;
+  global.GM_addValue = GM_addValue;
+  global.GM_addStat = GM_addStat;
 
   /**
    * GM_xmlhttpRequest polyfill.
@@ -79,6 +154,11 @@
       data: details.data || null
     };
 
+    if (!chromeAlive()) {
+      if (details.onerror) details.onerror(new Error('Extension context invalidated'));
+      return;
+    }
+    try {
     chrome.runtime.sendMessage(payload)
       .then((resp) => {
         if (!resp) {
@@ -102,6 +182,9 @@
       .catch((err) => {
         if (details.onerror) details.onerror(err);
       });
+    } catch (err) {
+      if (details.onerror) details.onerror(err);
+    }
   };
 
   // GM_addStyle polyfill

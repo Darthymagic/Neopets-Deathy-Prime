@@ -26,6 +26,28 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  if (msg.type === 'storage-add') {
+    const key = msg.key;
+    const amount = Number(msg.amount) || 0;
+    chrome.storage.local.get(key).then((data) => {
+      const next = (Number(data[key]) || 0) + amount;
+      return chrome.storage.local.set({ [key]: next }).then(() => sendResponse({ value: next }));
+    }).catch(() => sendResponse({ value: amount }));
+    return true;
+  }
+
+  if (msg.type === 'storage-add-stat') {
+    const key = msg.key;
+    const stat = msg.stat;
+    const amount = Number(msg.amount) || 0;
+    chrome.storage.local.get(key).then((data) => {
+      const stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, data[key] || {});
+      if (Object.prototype.hasOwnProperty.call(stats, stat)) stats[stat] += amount;
+      return chrome.storage.local.set({ [key]: stats }).then(() => sendResponse({ stats }));
+    }).catch(() => sendResponse({ stats: null }));
+    return true;
+  }
+
   if (msg.type === 'gm-xhr') {
     // Perform the fetch from the background (no CORS restriction)
     const opts = {

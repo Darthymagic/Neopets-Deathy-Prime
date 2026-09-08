@@ -36,6 +36,13 @@
   }
   function addProfit(amount) {
     if (!amount || amount <= 0) return getProfit();
+    if (typeof GM_addValue === 'function') {
+      GM_addValue(PROFIT_KEY, amount).then((t) => {
+        try { chrome.runtime.sendMessage({ type: 'shop-profit-updated', total: t }).catch(() => {}); } catch (_) {}
+        updateFinanceUI();
+      });
+      return getProfit() + amount;
+    }
     const t = getProfit() + amount;
     setProfit(t);
     return t;
@@ -48,8 +55,14 @@
   }
   function addSpend(amount) {
     if (!amount || amount <= 0) return getSpend();
-    // Soft caps from user: usershop ~1e6, TP ~2e7 per txn – ignore absurd values
     if (amount > 20000000) return getSpend();
+    if (typeof GM_addValue === 'function') {
+      GM_addValue(SPEND_KEY, amount).then((t) => {
+        try { chrome.runtime.sendMessage({ type: 'spending-updated', total: t }).catch(() => {}); } catch (_) {}
+        updateFinanceUI();
+      });
+      return getSpend() + amount;
+    }
     const t = getSpend() + amount;
     setSpend(t);
     return t;
@@ -858,6 +871,11 @@
         }
       };
       tryDropdown();
+      window.addEventListener('darthy-storage-changed', (ev) => {
+        const ch = ev && ev.detail;
+        if (!ch) return;
+        if (ch[PROFIT_KEY] || ch[SPEND_KEY] || ch[SHOP_NAME_KEY]) updateFinanceUI();
+      });
 
       if (isSalesHistoryPage()) {
         setTimeout(enhanceSalesPage, 600);
