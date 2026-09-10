@@ -40,7 +40,7 @@
       GM_addValue(PROFIT_KEY, amount).then((t) => {
         try { chrome.runtime.sendMessage({ type: 'shop-profit-updated', total: t }).catch(() => {}); } catch (_) {}
         updateFinanceUI();
-      });
+      }).catch(() => {});
       return getProfit() + amount;
     }
     const t = getProfit() + amount;
@@ -60,7 +60,7 @@
       GM_addValue(SPEND_KEY, amount).then((t) => {
         try { chrome.runtime.sendMessage({ type: 'spending-updated', total: t }).catch(() => {}); } catch (_) {}
         updateFinanceUI();
-      });
+      }).catch(() => {});
       return getSpend() + amount;
     }
     const t = getSpend() + amount;
@@ -876,6 +876,10 @@
         if (!ch) return;
         if (ch[PROFIT_KEY] || ch[SPEND_KEY] || ch[SHOP_NAME_KEY]) updateFinanceUI();
       });
+      setInterval(() => {
+        if (typeof DarthyPrimeStorage === 'undefined' || !DarthyPrimeStorage.reload) return;
+        DarthyPrimeStorage.reload().then(updateFinanceUI).catch(() => {});
+      }, 4000);
 
       if (isSalesHistoryPage()) {
         setTimeout(enhanceSalesPage, 600);

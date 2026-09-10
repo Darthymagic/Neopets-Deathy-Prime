@@ -65,12 +65,16 @@
     const clean = stripLogPrefix(message.trim().replace(/\s+/g, ' '));
     if (!clean) return;
 
+    if (typeof GM_appendLog === 'function') {
+      GM_appendLog(LOG_KEY, LOG_DATE_KEY, getTodayLocal(), clean).then(() => updateDropdownStats()).catch(() => {});
+      return;
+    }
     const log = getLog();
     if (log.length && stripLogPrefix(log[log.length - 1]) === clean) return;
-
     log.push(clean);
     if (log.length > 120) log.shift();
     GM_setValue(LOG_KEY, log);
+    GM_setValue(LOG_DATE_KEY, getTodayLocal());
     updateDropdownStats();
   }
 
@@ -90,7 +94,7 @@
       GM_addStat(STORAGE_KEY, stat, amount).then((s) => {
         if (s && typeof s === 'object') stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, s);
         updateDropdownStats();
-      }).catch(() => saveStats());
+      }).catch(() => {});
     } else {
       saveStats();
     }
@@ -707,13 +711,21 @@
 
     window.addEventListener('darthy-storage-changed', (ev) => {
       const ch = ev && ev.detail;
-      if (!ch || !STORAGE_KEY || !ch[STORAGE_KEY]) return;
-      const next = ch[STORAGE_KEY].newValue;
-      if (next && typeof next === 'object') {
-        stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, next);
-        updateDropdownStats();
+      if (!ch) return;
+      if (STORAGE_KEY && ch[STORAGE_KEY] && ch[STORAGE_KEY].newValue && typeof ch[STORAGE_KEY].newValue === 'object') {
+        stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, ch[STORAGE_KEY].newValue);
       }
+      updateDropdownStats();
     });
+
+    setInterval(() => {
+      if (!STORAGE_KEY || typeof DarthyPrimeStorage === 'undefined' || !DarthyPrimeStorage.reload) return;
+      DarthyPrimeStorage.reload().then(() => {
+        const next = GM_getValue(STORAGE_KEY, null);
+        if (next && typeof next === 'object') stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, next);
+        updateDropdownStats();
+      }).catch(() => {});
+    }, 4000);
 
     setInterval(() => {
       const boxes = document.querySelectorAll('#invResult, .invResult, .togglePopup__2020.invResult');

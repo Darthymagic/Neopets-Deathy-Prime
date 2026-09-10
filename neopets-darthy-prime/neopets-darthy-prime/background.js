@@ -19,7 +19,13 @@ chrome.runtime.onInstalled.addListener((details) => {
   }
 });
 
-// Handle GM_xmlhttpRequest proxy + simple pings
+let storageChain = Promise.resolve();
+function enqueueStorage(fn) {
+  const run = storageChain.then(fn, fn);
+  storageChain = run.catch(() => {});
+  return run;
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'ping') {
     sendResponse({ ok: true, version: '1.1.0' });
@@ -29,10 +35,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'storage-add') {
     const key = msg.key;
     const amount = Number(msg.amount) || 0;
-    chrome.storage.local.get(key).then((data) => {
+    enqueueStorage(async () => {
+      const data = await chrome.storage.local.get(key);
       const next = (Number(data[key]) || 0) + amount;
-      return chrome.storage.local.set({ [key]: next }).then(() => sendResponse({ value: next }));
-    }).catch(() => sendResponse({ value: amount }));
+      await chrome.storage.local.set({ [key]: next });
+      sendResponse({ value: next });
+    }).catch((err) => sendResponse({ error: String(err) }));
     return true;
   }
 
@@ -40,11 +48,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const key = msg.key;
     const stat = msg.stat;
     const amount = Number(msg.amount) || 0;
-    chrome.storage.local.get(key).then((data) => {
+    enqueueStorage(async () => {
+      const data = await chrome.storage.local.get(key);
       const stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, data[key] || {});
       if (Object.prototype.hasOwnProperty.call(stats, stat)) stats[stat] += amount;
-      return chrome.storage.local.set({ [key]: stats }).then(() => sendResponse({ stats }));
-    }).catch(() => sendResponse({ stats: null }));
+      await chrome.storage.local.set({ [key]: stats });
+      sendResponse({ stats });
+    }).catch((err) => sendResponse({ error: String(err) }));
+    return true;
+  }
+
+  if (msg.type === 'storage-append-log') {
+    enqueueStorage(async () => {
+      const today = msg.today;
+      const got = await chrome.storage.local.get([msg.logKey, msg.dateKey]);
+      let log = Array.isArray(got[msg.logKey]) ? got[msg.logKey].slice() : [];
+      const storedDate = got[msg.dateKey] || '';
+      if (storedDate !== today) log = [];
+      const line = String(msg.line || '').trim();
+      if (line && log[log.length - 1] !== line) {
+        log.push(line);
+        if (log.length > 120) log.shift();
+      }
+      await chrome.storage.local.set({ [msg.logKey]: log, [msg.dateKey]: today });
+      sendResponse({ log, date: today });
+    }).catch((err) => sendResponse({ error: String(err) }));
     return true;
   }
 

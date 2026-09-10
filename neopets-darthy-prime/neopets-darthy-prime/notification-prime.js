@@ -270,7 +270,7 @@
 
   // ---------- Instant Trade profit (eventcode-6009) ----------
   // "user has purchased lot 123 for 4,000,000 NP!"
-  // Blacklist lot ID for 6h; at 5h prompt to delete the alert so it can't double-count.
+  // Blacklist lot ID for 6h; at 5h auto-delete the alert so it can't double-count.
   const INSTANT_TRADE_KEY = 'darthy_instant_trade_lots';
   const SIX_H = 6 * 60 * 60 * 1000;
   const FIVE_H = 5 * 60 * 60 * 1000;
@@ -376,30 +376,19 @@
       return;
     }
 
-    // Only prompt once per session for this set
-    if (window.__darthyInstantPromptOpen) return;
-    window.__darthyInstantPromptOpen = true;
+    if (window.__darthyInstantAutoClear) return;
+    window.__darthyInstantAutoClear = true;
 
-    const names = due.map(d => 'lot ' + d.lotId + ' (' + (d.amount || 0).toLocaleString() + ' NP)').join('\\n');
-    const msg = due.length === 1
-      ? 'An instant trade notification is ~5 hours old:\\n' + names + '\\n\\nDelete it now so it cannot be counted twice if the page reloads?\\n\\n(OK = delete this alert)'
-      : due.length + ' instant trade notifications are ~5 hours old:\\n' + names + '\\n\\nDelete them now so they cannot be counted twice?\\n\\n(OK = delete these alerts)';
-
-    if (confirm(msg)) {
-      due.forEach(d => {
-        const el = document.querySelector('.alert-x[data-delid="' + d.delId + '"]');
-        if (el) {
-          try { el.click(); } catch (_) {}
-        }
-        if (lots[d.lotId]) lots[d.lotId].prompted = true;
-      });
-    } else {
-      due.forEach(d => {
-        if (lots[d.lotId]) lots[d.lotId].prompted = true;
-      });
-    }
+    due.forEach(d => {
+      const el = document.querySelector('.alert-x[data-delid="' + d.delId + '"]') ||
+        document.querySelector('.alert-x[data-delid="' + String(d.delId) + '"]');
+      if (el) {
+        try { el.click(); } catch (_) {}
+      }
+      if (lots[d.lotId]) lots[d.lotId].prompted = true;
+    });
     saveInstantLots(lots);
-    setTimeout(() => { window.__darthyInstantPromptOpen = false; }, 2000);
+    setTimeout(() => { window.__darthyInstantAutoClear = false; }, 2000);
   }
 
   // Hook: when native alerts are scanned for the panel / badge
@@ -416,7 +405,7 @@
     return result;
   };
 
-  // When Clear Notifications is used, mark all pending lots as prompted (no 5h nag)
+  // When Clear Notifications is used, mark all pending lots as prompted
   document.addEventListener('click', function (e) {
     const t = e.target;
     if (t && (t.id === 'clear-notifications-btn' || (t.closest && t.closest('#clear-notifications-btn')))) {
