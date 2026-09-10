@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Darthy Prime – Settings</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: Verdana, Arial, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      margin: 0;
+      padding: 0;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 32px 20px;
+    }
+    h1 {
+      font-size: 22px;
+      color: #7dd3fc;
+      margin-bottom: 6px;
+    }
+    .subtitle { color: #94a3b8; margin-bottom: 28px; font-size: 14px; }
+    .card {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    .card h2 {
+      font-size: 15px;
+      color: #38bdf8;
+      margin: 0 0 12px 0;
+    }
+    label {
+      display: block;
+      font-size: 13px;
+      color: #cbd5e1;
+      margin-bottom: 6px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 6px;
+      border: 1px solid #475569;
+      background: #0f172a;
+      color: #f1f5f9;
+      font-size: 14px;
+    }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 2px rgba(56,189,248,0.25);
+    }
+    .hint { font-size: 12px; color: #64748b; margin-top: 6px; }
+    .btn {
+      display: inline-block;
+      padding: 10px 18px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 14px;
+    }
+    .btn:hover { background: #1d4ed8; }
+    .btn-danger {
+      background: #dc2626;
+    }
+    .btn-danger:hover { background: #b91c1c; }
+    .status {
+      margin-top: 10px;
+      font-size: 13px;
+      min-height: 20px;
+    }
+    .status.ok { color: #4ade80; }
+    .status.err { color: #f87171; }
+    .modules label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .modules input { width: auto; }
+    ul { padding-left: 18px; color: #94a3b8; font-size: 13px; }
+    li { margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Neopets Darthy Prime</h1>
+    <p class="subtitle">Settings &amp; configuration</p>
+
+    <div class="card">
+      <h2>Main battle pet &amp; Shop name</h2>
+      <label for="pet-name">Enter main battle pet name</label>
+      <input type="text" id="pet-name" placeholder="Darthenvy" autocomplete="off" maxlength="20">
+      <p class="hint" style="margin-bottom:14px;">Used by the Stats Tracker (Level / HP / Strength / Defence). Case-sensitive as on Neopets. Refresh open tabs after saving.</p>
+
+      <label for="shop-name">Enter Shop Name <span style="color:#64748b;">(emoji allowed)</span></label>
+      <input type="text" id="shop-name" placeholder="e.g. ✨ Darthy's Emporium" autocomplete="off" maxlength="40">
+      <p class="hint">Shown above Shop Profit in the profile dropdown.</p>
+
+      <button class="btn" id="save-pet">Save</button>
+      <div class="status" id="pet-status"></div>
+    </div>
+
+    <div class="card">
+      <h2>What is included</h2>
+      <ul>
+        <li><strong>Stats Tracker</strong> – Kitchen, Lab, Inventory, SDB, Scratchcards, Training, Faerie Quests + daily log (original v1.15 logic)</li>
+        <li><strong>Notification Prime</strong> – Training Helper (quick-start buttons, auto-complete, Item Grabber, SDB withdraw) + floating notification bell for finished courses &amp; native alerts (original v4.8.3)</li>
+        <li><strong>Stamp Album Helper</strong> – Missing stamps overview + Jellyneo data + double-click SSW search (original logic)</li>
+        <li><strong>Shop History Profit Tracker</strong> – Process sales history into a running total, shown in profile dropdown + popup – Missing stamps overview + Jellyneo data + double-click SSW search (original logic)</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Reset Stats</h2>
+      <p class="hint" style="margin-bottom:10px;">Clears the cumulative totals and day counter for the currently selected pet. Does <em>not</em> affect training notifications or other pets.</p>
+      <button class="btn btn-danger" id="reset-stats">Reset Stats for Current Pet</button>
+      <div class="status" id="reset-status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Shop Profit &amp; Spending</h2>
+      <p class="hint" style="margin-bottom:10px;">
+        <strong>Profit</strong> – Process sales on Shop → Sales History.<br>
+        <strong>Spending</strong> – Auto-tracks usershop buys and Trading Post lot purchases.
+      </p>
+      <div style="font-size:16px;font-weight:bold;color:#4ade80;margin:6px 0;">Profit: <span id="opt-shop-profit">—</span></div>
+      <div style="font-size:16px;font-weight:bold;color:#f87171;margin:6px 0 12px;">Spending: <span id="opt-shop-spend">—</span></div>
+      <button class="btn btn-danger" id="reset-shop-profit" style="margin-right:8px;">Reset Profit</button>
+      <button class="btn btn-danger" id="reset-shop-spend">Reset Spending</button>
+      <div class="status" id="shop-reset-status"></div>
+    </div>
+
+    <div class="card">
+      <h2>Data locations</h2>
+      <p class="hint">
+        • Stats totals &amp; daily log → chrome.storage.local (survives across devices if you use Chrome Sync in future)<br>
+        • Training active/completed lists → localStorage on neopets.com (same as the original userscript, so your existing data is kept)
+      </p>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

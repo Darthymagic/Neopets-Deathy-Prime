@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Neopets Darthy Prime</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 320px;
+      font-family: Verdana, Arial, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-size: 13px;
+    }
+    .header {
+      background: linear-gradient(135deg, #4a90e2, #2c5aa0);
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header img { width: 32px; height: 32px; border-radius: 6px; }
+    .header h1 { font-size: 15px; font-weight: bold; color: white; }
+    .header span { font-size: 11px; opacity: 0.85; display: block; }
+    .section {
+      padding: 12px 16px;
+      border-bottom: 1px solid #2a2a4a;
+    }
+    .section h2 {
+      font-size: 12px;
+      color: #7dd3fc;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 3px 0;
+    }
+    .stat-row .label { color: #94a3b8; }
+    .stat-row .value { font-weight: bold; }
+    .value.pos { color: #4ade80; }
+    .value.neg { color: #f87171; }
+    .value.zero { color: #94a3b8; }
+    .pet-name {
+      font-size: 14px;
+      font-weight: bold;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 8px;
+      margin-top: 8px;
+      border: none;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      text-align: center;
+      text-decoration: none;
+      color: white;
+    }
+    .btn-primary { background: #4a90e2; }
+    .btn-primary:hover { background: #3a7bc8; }
+    .btn-secondary { background: #374151; }
+    .btn-secondary:hover { background: #4b5563; }
+    .footer {
+      padding: 10px 16px;
+      font-size: 10px;
+      color: #6b7280;
+      text-align: center;
+    }
+    .modules {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .mod {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+    }
+    .mod .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #4ade80;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <img src="icons/icon48.png" alt="icon">
+    <div>
+      <h1>Neopets Darthy Prime</h1>
+      <span>v1.0.0 · Unified Tracker</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Active Pet Stats</h2>
+    <div class="pet-name" id="pet-name">—</div>
+    <div class="stat-row"><span class="label">Level</span><span class="value" id="s-level">—</span></div>
+    <div class="stat-row"><span class="label">HP</span><span class="value" id="s-hp">—</span></div>
+    <div class="stat-row"><span class="label">Strength</span><span class="value" id="s-str">—</span></div>
+    <div class="stat-row"><span class="label">Defence</span><span class="value" id="s-def">—</span></div>
+    <div style="margin-top:6px;font-size:11px;color:#7dd3fc;" id="days-tracked"></div>
+  </div>
+
+  <div class="section">
+    <h2 id="popup-shop-title">Shop</h2>
+    <div class="stat-row"><span class="label">Profit</span><span class="value" id="shop-profit" style="color:#4ade80;">—</span></div>
+    <div class="stat-row"><span class="label">Spending</span><span class="value" id="shop-spend" style="color:#f87171;">—</span></div>
+  </div>
+
+  <div class="section">
+    <h2>Modules</h2>
+    <div class="modules">
+      <div class="mod"><span class="dot"></span> Stats Tracker (Kitchen / Lab / Faerie / Training)</div>
+      <div class="mod"><span class="dot"></span> Notification Prime + Training Helper</div>
+      <div class="mod"><span class="dot"></span> Stamp Album Helper</div>
+      <div class="mod"><span class="dot"></span> Shop History Profit Tracker</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <a href="options.html" target="_blank" class="btn btn-primary">Open Settings</a>
+    <a href="https://www.neopets.com/" target="_blank" class="btn btn-secondary" style="margin-top:6px;">Open Neopets</a>
+  </div>
+
+  <div class="footer">
+    All original userscript logic preserved · By Darthy
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
