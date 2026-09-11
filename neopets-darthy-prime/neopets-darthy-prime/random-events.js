@@ -62,10 +62,20 @@
 
     let handled = false;
 
+    // NC (not NP profit)
+    const ncM = text.match(/\b([\d,]+)\s*NC\b/i);
+    if (ncM && /gift|gives?|given|hands you|receive/i.test(text)) {
+      const amt = parseAmount(ncM[1]);
+      if (amt > 0 && window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+        window.DarthyPrimeStats.addToLog('+' + amt.toLocaleString() + ' NC');
+        handled = true;
+      }
+    }
+
     // NP gained
-    const gainNP = text.match(/(?:find|found|receive[ds]?|gain[s]?|given|awarded|won|collect(?:ed)?)\s+(?:an?\s+)?([\d,]+)\s*NP/i) ||
+    const gainNP = text.match(/(?:find|found|receive[ds]?|gain[s]?|given|awarded|won|collect(?:ed)?|gift of)\s+(?:an?\s+)?([\d,]+)\s*NP\b/i) ||
                    text.match(/([\d,]+)\s*NP\s+(?:has been|was|is)\s+(?:added|credited|deposited)/i) ||
-                   text.match(/(?:gives? you|hands you|pays? you)\s+([\d,]+)\s*NP/i);
+                   text.match(/(?:gives? you|hands you|pays? you)\s+([\d,]+)\s*NP\b/i);
     if (gainNP) {
       const amount = parseAmount(gainNP[1]);
       if (amount > 0 && amount < 50000000) {
@@ -115,30 +125,38 @@
       }
     }
 
-    // Item received — bold names only from a confirmed RE box
-    const giveTalk = /given|gives? you|you (?:find|found|receive|get|got)|free copy of/i.test(text);
-    const items = giveTalk && Array.isArray(boldItems) ? boldItems : [];
-    if (items.length) {
+    // Item received — bold names in the RE copy (Jacko / Sloth / Mira / travelling library etc.)
+    const storyGive = /give you|gives? you|here to give|take this|hands you|hand it to you|a copy of|free copy of|price for this|figure this|offers you|looking for a new book/i.test(text);
+    let items = Array.isArray(boldItems) ? boldItems.filter(looksLikeItemName) : [];
+    if (!items.length) {
+      const itemM = text.match(/(?:take this|give you|gives? you|here to give you|hands you(?: a copy of)?|a copy of|free copy of|price for this|figure this|offers you(?: an?)?)\s+([A-Z][^!?.]{1,70}?)(?:[.!?"']|$| out\b)/i);
+      if (itemM) {
+        const name = String(itemM[1] || '').replace(/^an?\s+/i, '').replace(/\s+out$/i, '').trim();
+        if (looksLikeItemName(name)) items = [name];
+      }
+    }
+    if (items.length && (storyGive || items.length)) {
       items.forEach((name) => {
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
           window.DarthyPrimeStats.addToLog("You've been given " + name);
         }
       });
       handled = true;
-    } else if (giveTalk) {
-      const itemM = text.match(/(?:you (?:find|found|receive[ds]?|get|got|are given)|given a free copy of|gives? you)\s+(?:an?\s+)?([A-Z][^.!?\n]{2,60}?)(?:[.!?]|$)/);
-      if (itemM && !/NP/i.test(itemM[1])) {
-        const name = itemM[1].replace(/^free copy of\s+/i, '').trim();
-        if (name && window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-          window.DarthyPrimeStats.addToLog("You've been given " + name);
-        }
-        handled = true;
-      }
     }
 
     if (handled) {
       console.log('%c[DarthyPrime RE] ' + text.slice(0, 120), 'color:#a78bfa');
     }
+  }
+
+  function looksLikeItemName(name) {
+    const n = String(name || '').replace(/\s+/g, ' ').trim();
+    if (!n || n.length < 3 || n.length > 70) return false;
+    if (/^\d+$/.test(n)) return false;
+    if (/^(np|nc|ok|close|enjoy)$/i.test(n)) return false;
+    if (/something has happened|something is happening|take this|fashion is for|unquestioning loyalty|neggery|darling/i.test(n)) return false;
+    if (/\b(np|nc)\b/i.test(n) && n.length < 12) return false;
+    return true;
   }
 
   function boldItemsFrom(el) {
@@ -164,12 +182,18 @@
     function pushEl(el) {
       if (!el || seenEl.has(el)) return;
       seenEl.add(el);
-      const t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!/something has happened|something is happening/i.test(t)) return;
       const copy = el.querySelector && el.querySelector('.copy');
       const box = copy || el;
+      const t = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
+      const head = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!/something has happened|something is happening/i.test(head) &&
+          !/something has happened|something is happening/i.test(t)) return;
+      if (/up for auction|start price \(np\)|minimum increment/i.test(t)) return;
+      const snippet = t.slice(0, 360);
       chunks.push({
-        text: t.slice(0, 800),
+        text: /something has happened|something is happening/i.test(snippet)
+          ? snippet
+          : ('Something has happened! ' + snippet).slice(0, 360),
         items: boldItemsFrom(box)
       });
     }
@@ -180,21 +204,16 @@
       pushEl(el.closest('div, td, table, section, article') || el.parentElement);
     });
 
-    const all = document.querySelectorAll('div, td, section, article, table');
-    for (let i = 0; i < all.length; i++) {
-      const el = all[i];
-      const kids = el.childNodes;
-      let hit = false;
-      for (let j = 0; j < kids.length && j < 12; j++) {
-        const n = kids[j];
-        const t = (n.textContent || '').trim();
-        if (t && /something has happened|something is happening/i.test(t) && t.length < 80) {
-          hit = true;
-          break;
-        }
-      }
-      if (hit) pushEl(el);
-    }
+    document.querySelectorAll('div, td, section, article').forEach((el) => {
+      const own = Array.from(el.childNodes).some((n) => {
+        if (n.nodeType !== 1 && n.nodeType !== 3) return false;
+        const t = (n.textContent || '').replace(/\s+/g, ' ').trim();
+        return t.length > 8 && t.length < 60 && /something has happened|something is happening/i.test(t);
+      });
+      if (!own) return;
+      if ((el.innerText || '').length > 1200) return;
+      pushEl(el);
+    });
 
     chunks.forEach((c) => handleEventText(c.text, c.items));
   }

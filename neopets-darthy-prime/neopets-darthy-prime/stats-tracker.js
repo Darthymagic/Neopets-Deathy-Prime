@@ -60,10 +60,25 @@
       .trim();
   }
 
+  function onAuctionPage() {
+    return /auction/i.test(location.pathname + location.href);
+  }
+  function isJunkLogLine(s) {
+    const t = String(s || '').replace(/\s+/g, ' ').trim();
+    if (!t) return true;
+    if (t.length > 160) return true;
+    if (/couldn['’]t complete your purchase|network error|please check your connection|an error occurred|please try again|sorry!\s*we couldn|check your connection/i.test(t)) return true;
+    if (/\berror\b/i.test(t) && /\bOK\b/.test(t)) return true;
+    if (/^error\b/i.test(t) && t.length < 80) return true;
+    if (/up for auction|start price|minimum increment|auction length|neofriends only|guild members only|put into auction|successfully been put into auction/i.test(t)) return true;
+    return false;
+  }
+
   function addToLog(message) {
     if (!message) return;
     const clean = stripLogPrefix(message.trim().replace(/\s+/g, ' '));
     if (!clean) return;
+    if (isJunkLogLine(clean)) return;
 
     if (typeof GM_appendLog === 'function') {
       GM_appendLog(LOG_KEY, LOG_DATE_KEY, getTodayLocal(), clean).then(() => updateDropdownStats()).catch(() => {});
@@ -213,6 +228,7 @@
   }
 
   function processInvUse() {
+    if (onAuctionPage()) return;
     const boxes = collectUsePopups();
     if (!boxes.length) {
       [...processedThisSession].forEach((k) => {
@@ -224,6 +240,7 @@
       const raw = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
       const text = stripHungerText(raw);
       if (!text || text.length < 6) return;
+      if (typeof isJunkLogLine === 'function' && (isJunkLogLine(text) || isJunkLogLine(typeof raw !== 'undefined' ? raw : text))) return;
       if (/you bought|you spent|has been added to your inventory/i.test(text) &&
           !/gains?|gained|increased|went up|loses?|lost/i.test(text)) return;
       if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense/i.test(text)) return;
@@ -309,6 +326,7 @@
   }
 
   function scanPageForGains() {
+    if (onAuctionPage()) return;
     // Never scan while the user is interacting with our own UI
     const trackerUI = document.getElementById('neopets-stats-section');
     if (trackerUI && trackerUI.contains(document.activeElement)) return;
@@ -540,6 +558,8 @@
   function processKitchen() {
     // Kitchen gains only come from the Cooking Pot / Kitchen Quests pages — never training schools
     if (/training\.phtml|academy\.phtml|fight_training/i.test(location.href)) return;
+    if (onAuctionPage()) return;
+    if (!/kitchen|cooking|lab\.phtml|process_lab/i.test(location.href + location.pathname)) return;
 
     const boldTags = document.querySelectorAll('b');
     for (const b of boldTags) {

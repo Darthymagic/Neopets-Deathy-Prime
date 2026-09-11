@@ -8,6 +8,13 @@
     await window.DarthyPrimeStorage.ready;
   }
 
+  if (!document.getElementById('darthy-prime-base-css')) {
+    const s = document.createElement('style');
+    s.id = 'darthy-prime-base-css';
+    s.textContent = '#neo-bell{transition:transform .15s ease}#neo-bell:hover{transform:scale(1.08)}#neopets-stats-section{font-family:Verdana,Arial,sans-serif!important}.fake-stamp{filter:grayscale(100%)!important;opacity:.85}.stamp-selected{background:#e6ffe6!important}#missing-stamps-section a:hover img{box-shadow:0 0 8px #c33;transform:scale(1.08);transition:transform .15s ease,box-shadow .15s ease}.darthy-prime-badge{position:fixed;bottom:12px;left:12px;background:linear-gradient(135deg,#4a90e2,#2c5aa0);color:#fff;font-size:11px;padding:4px 10px;border-radius:12px;z-index:99990;opacity:.85;pointer-events:none;font-family:Verdana,sans-serif;box-shadow:0 2px 8px rgba(0,0,0,.25)}';
+    (document.head || document.documentElement).appendChild(s);
+  }
+
   function injectBadge() {
     if (document.getElementById('darthy-prime-badge')) return;
     const badge = document.createElement('div');
