@@ -1,20 +1,12 @@
 # Neopets Darthy Prime
 
-**Unified browser extension** that brings together your three userscripts with zero functionality lost:
-
-1. **Stats Tracker (Kitchen + Lab)** – v1.15 logic  
-   Tracks Level / HP / Strength / Defence gains from Kitchen, Lab, Inventory, SDB, Scratchcards, Training Schools, Faerie Quests + daily log. Injects into the profile dropdown.
-
-2. **Notification Prime** – v4.8.3 logic  
-   Training Helper Plus (smart quick-start buttons, complete single/all courses, floating 🛎️ notification bell for finished trainings & native Neopets alerts, Clear Notifications button.
-
-3. **Stamp Album Helper**  
-   Fetches Jellyneo data, shows missing stamps section, greyscale placeholders, click-for-info, double-click SSW search (if Premium).
-
-4. **Shop History Profit Tracker** (new in 1.1.0)  
-   On your Shop → Sales History page the "Clear Sales History" button becomes **"Process Shop History"**.  
-   Clicking it adds every listed sale price to a running total, then clears the history so you never double-count.  
-   Total is shown under the table and also in the profile dropdown + extension popup.
+Prime includes, Tracking of all kinds. tracks NP spend/gain, Stats gain/loss, REs, Shop Inventory and training times of pets. 
+Quality of life training helper. 
+Global notifications system. 
+SW Prime helps you find the lowest price. 
+Premium item checked for QL if it's good or not which also needs user management of the item list.
+Sidebar build into the neopets UI to show your stats gained, spent NP and Log for gains of all kinds.
+Stamp Album Prime. Lets you know what stamps you're missing and links to databases to help you with buying if need be.
 
 ## Installation (Chrome / Edge / Brave / Opera)
 
