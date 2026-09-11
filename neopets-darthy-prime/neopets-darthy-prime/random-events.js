@@ -46,7 +46,7 @@
     return text.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 180);
   }
 
-  function handleEventText(text) {
+  function handleEventText(text, boldItems) {
     if (!text || text.length < 12) return;
     const fp = fingerprint(text);
     const seen = loadSeen();
@@ -57,15 +57,8 @@
 
     const lower = text.toLowerCase();
 
-    // Must look like a random event
-    const isRE =
-      /something has happened|something is happening|random event/i.test(text) ||
-      /a faerie|the laboratory|you have been|suddenly|a dark mage|a grarrl|someone has|you found|you receive|you lose|stolen|robbed/i.test(text);
-    // Also allow if we're inside an RE container
-    if (!isRE && !document.querySelector('.randomEvent, #randomEvent, .something-happened, .re-event')) {
-      // still process if strong NP/stat patterns
-      if (!/\d[\d,]*\s*np|gains?\s+\d|loses?\s+\d/i.test(text)) return;
-    }
+    const isRE = /something has happened|something is happening/i.test(text);
+    if (!isRE) return;
 
     let handled = false;
 
@@ -122,13 +115,25 @@
       }
     }
 
-    // Item received
-    const itemM = text.match(/(?:you (?:find|found|receive[ds]?|get|got|are given)|gives? you)\s+(?:an?\s+)?([A-Z][^.!?\n]{2,60}?)(?:[.!?]|$)/);
-    if (itemM && !/NP/i.test(itemM[1])) {
-      if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-        window.DarthyPrimeStats.addToLog(itemM[1].trim());
-      }
+    // Item received — bold names only from a confirmed RE box
+    const giveTalk = /given|gives? you|you (?:find|found|receive|get|got)|free copy of/i.test(text);
+    const items = giveTalk && Array.isArray(boldItems) ? boldItems : [];
+    if (items.length) {
+      items.forEach((name) => {
+        if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+          window.DarthyPrimeStats.addToLog("You've been given " + name);
+        }
+      });
       handled = true;
+    } else if (giveTalk) {
+      const itemM = text.match(/(?:you (?:find|found|receive[ds]?|get|got|are given)|given a free copy of|gives? you)\s+(?:an?\s+)?([A-Z][^.!?\n]{2,60}?)(?:[.!?]|$)/);
+      if (itemM && !/NP/i.test(itemM[1])) {
+        const name = itemM[1].replace(/^free copy of\s+/i, '').trim();
+        if (name && window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+          window.DarthyPrimeStats.addToLog("You've been given " + name);
+        }
+        handled = true;
+      }
     }
 
     if (handled) {
@@ -136,45 +141,62 @@
     }
   }
 
+  function boldItemsFrom(el) {
+    if (!el || !el.querySelectorAll) return [];
+    const names = [];
+    const seen = {};
+    el.querySelectorAll('b, strong').forEach((b) => {
+      const name = (b.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!name || name.length < 2 || name.length > 80) return;
+      if (/something has happened|something is happening|enjoy!?|np\b|close/i.test(name)) return;
+      const key = name.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      names.push(name);
+    });
+    return names;
+  }
+
   function scan() {
-    // Common RE containers on modern + classic Neopets
-    const selectors = [
-      '.randomEvent',
-      '#randomEvent',
-      '.something-happened',
-      '[class*="random-event"]',
-      '[class*="RandomEvent"]',
-      'div.event',
-      // Classic tables / headers
-    ];
     const chunks = [];
+    const seenEl = new Set();
 
-    selectors.forEach(sel => {
-      document.querySelectorAll(sel).forEach(el => {
-        const t = (el.innerText || el.textContent || '').trim();
-        if (t) chunks.push(t);
+    function pushEl(el) {
+      if (!el || seenEl.has(el)) return;
+      seenEl.add(el);
+      const t = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!/something has happened|something is happening/i.test(t)) return;
+      const copy = el.querySelector && el.querySelector('.copy');
+      const box = copy || el;
+      chunks.push({
+        text: t.slice(0, 800),
+        items: boldItemsFrom(box)
       });
-    });
-
-    // Header text scan
-    document.querySelectorAll('h1, h2, h3, b, strong, p').forEach(el => {
-      const t = (el.textContent || '').trim();
-      if (/something has happened|something is happening/i.test(t)) {
-        // Grab parent block text
-        const parent = el.closest('div, td, table, section') || el.parentElement;
-        const block = (parent && (parent.innerText || parent.textContent) || t).trim();
-        if (block) chunks.push(block.slice(0, 800));
-      }
-    });
-
-    // Also scan full body once lightly for RE phrases if banner present
-    if (/something has happened|something is happening/i.test(document.body ? document.body.innerText : '')) {
-      const body = document.body.innerText || '';
-      const idx = body.search(/something has happened|something is happening/i);
-      if (idx >= 0) chunks.push(body.slice(idx, idx + 600));
     }
 
-    chunks.forEach(handleEventText);
+    document.querySelectorAll('.randomEvent, #randomEvent, .something-happened, [class*="random-event"], [class*="RandomEvent"]').forEach(pushEl);
+
+    document.querySelectorAll('img[alt*="Something has happened"], img[alt*="Something is happening"], [class*="happened"]').forEach((el) => {
+      pushEl(el.closest('div, td, table, section, article') || el.parentElement);
+    });
+
+    const all = document.querySelectorAll('div, td, section, article, table');
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      const kids = el.childNodes;
+      let hit = false;
+      for (let j = 0; j < kids.length && j < 12; j++) {
+        const n = kids[j];
+        const t = (n.textContent || '').trim();
+        if (t && /something has happened|something is happening/i.test(t) && t.length < 80) {
+          hit = true;
+          break;
+        }
+      }
+      if (hit) pushEl(el);
+    }
+
+    chunks.forEach((c) => handleEventText(c.text, c.items));
   }
 
   window.DarthyPrimeRE = {
@@ -185,12 +207,12 @@
       const iv = setInterval(() => {
         n++;
         scan();
-        if (n >= 8) clearInterval(iv); // ~4s
-      }, 500);
+        if (n >= 20) clearInterval(iv);
+      }, 400);
 
       const obs = new MutationObserver(() => scan());
       obs.observe(document.documentElement, { childList: true, subtree: true });
-      setTimeout(() => obs.disconnect(), 6000);
+      setTimeout(() => obs.disconnect(), 20000);
     }
   };
 })();

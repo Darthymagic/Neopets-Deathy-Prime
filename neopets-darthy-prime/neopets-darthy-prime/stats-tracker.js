@@ -142,35 +142,99 @@
   }
 
 
-  function processInvUse() {
-    const boxes = document.querySelectorAll('#invResult, .invResult, .togglePopup__2020.invResult');
-    boxes.forEach(box => {
-      const visible = box.offsetParent !== null && (!window.getComputedStyle || getComputedStyle(box).display !== 'none');
-      if (!visible) return;
-      const text = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
-      if (!text || text.length < 8) return;
-      if (!new RegExp(PET_NAME, 'i').test(text)) return;
-      if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger/i.test(text)) return;
+  function popupIsOpen(el) {
+    if (!el) return false;
+    try {
+      const st = window.getComputedStyle(el);
+      if (!st || st.display === 'none' || st.visibility === 'hidden') return false;
+      if (parseFloat(st.opacity) === 0) return false;
+      const r = el.getBoundingClientRect();
+      return r.width >= 30 && r.height >= 30;
+    } catch (_) {
+      return !!(el.offsetWidth || el.offsetHeight);
+    }
+  }
 
-      const escaped = PET_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const gainRe = new RegExp(
-        escaped + '\\s+(gains?|gained|loses?|lost)\\s+.{3,180}?(?:[.!]|$)',
-        'i'
-      );
-      const m = text.match(gainRe);
-      let line = m ? m[0].replace(/\s+/g, ' ').trim() : '';
-      if (!line) {
-        const paras = box.querySelectorAll('p, b');
-        for (const p of paras) {
-          const tt = (p.textContent || '').replace(/\s+/g, ' ').trim();
-          if (new RegExp(escaped + '\\s+(gains?|gained|loses?|lost)', 'i').test(tt)) {
-            line = tt;
-            break;
-          }
-        }
+  function collectUsePopups() {
+    const found = new Set();
+    const sels = [
+      '#invResult',
+      '.invResult',
+      '.togglePopup__2020.invResult',
+      '.togglePopup__2020.movePopup__2020',
+      '#sdbResult',
+      '.sdb-result',
+      '#useResult',
+      '.popup-body__2020',
+      '.inv-result',
+      '[id*="invResult"]'
+    ];
+    sels.forEach((s) => {
+      document.querySelectorAll(s).forEach((el) => {
+        const wrap = el.closest('#invResult, .invResult, .togglePopup__2020, .movePopup__2020, #sdbResult') || el;
+        found.add(wrap);
+      });
+    });
+    return Array.from(found).filter(popupIsOpen);
+  }
+
+  function extractUseGainLine(box, text) {
+    const escaped = PET_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const gainRe = new RegExp(
+      escaped + '\\s+(gains?|gained|loses?|lost)\\s+.{3,220}?(?:[.!]|$)',
+      'i'
+    );
+    const m = text.match(gainRe);
+    if (m) return m[0].replace(/\s+/g, ' ').trim();
+    const anyRe = /((?:gains?|gained|loses?|lost)\s+.{3,220}?(?:[.!]|$))/i;
+    const nodes = box.querySelectorAll('p, b, h3, .popup-body__2020, .popup-copy, span');
+    for (const n of nodes) {
+      const tt = (n.textContent || '').replace(/\s+/g, ' ').trim();
+      if (gainRe.test(tt)) return tt.match(gainRe)[0].replace(/\s+/g, ' ').trim();
+      if (anyRe.test(tt) && /hit\s*point|health|endurance|strength|defence|defense|level|movement|agility|speed/i.test(tt)) {
+        return (PET_NAME + ' ' + tt.match(anyRe)[1]).replace(/\s+/g, ' ').trim();
       }
-      if (!line) line = text.replace(/Success!/i, '').replace(/Close and Refresh/i, '').trim().slice(0, 180);
+    }
+    const any = text.match(anyRe);
+    if (any && /hit\s*point|health|endurance|strength|defence|defense|level/i.test(any[1])) {
+      return (PET_NAME + ' ' + any[1]).replace(/\s+/g, ' ').trim();
+    }
+    return '';
+  }
+
+  function stripHungerText(s) {
+    return String(s || '')
+      .replace(/\b(?:he|she|your pet|they)\s+(?:was|is|were|are)\s+(?:dying|starving|hungry|very hungry|somewhat hungry|not hungry|fine|happy|bloated)(?:\s+and\s+now\s+(?:he|she|they)\s+(?:is|are)\s+(?:dying|starving|hungry|very hungry|somewhat hungry|not hungry|fine|happy|bloated))?[!.,]*/gi, ' ')
+      .replace(/\b(?:dying|starving|hungry|very hungry|somewhat hungry|not hungry|bloated)\b/gi, ' ')
+      .replace(/\b(?:lost|gained|loses?|gains?)\s+some\s+weight\b[^.!]*/gi, ' ')
+      .replace(/\bhunger(?:\s+level)?\b[^.!]{0,50}/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  function processInvUse() {
+    const boxes = collectUsePopups();
+    if (!boxes.length) {
+      [...processedThisSession].forEach((k) => {
+        if (String(k).indexOf('invuse|') === 0) processedThisSession.delete(k);
+      });
+      return;
+    }
+    boxes.forEach((box) => {
+      const raw = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
+      const text = stripHungerText(raw);
+      if (!text || text.length < 6) return;
+      if (/you bought|you spent|has been added to your inventory/i.test(text) &&
+          !/gains?|gained|increased|went up|loses?|lost/i.test(text)) return;
+      if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense/i.test(text)) return;
+
+      let line = stripHungerText(extractUseGainLine(box, text) || '');
+      if (!line) {
+        line = text.replace(/Success!/ig, '').replace(/Close and Refresh/ig, '').trim().slice(0, 220);
+      }
+      line = stripHungerText(line);
       if (!line) return;
+      if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense|level/i.test(line)) return;
 
       const key = 'invuse|' + line.toLowerCase();
       if (processedThisSession.has(key)) return;
@@ -178,15 +242,26 @@
 
       addToLog(line);
 
+      const src = line + ' ';
       const pairRe = /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(hit\s*points?|health|endurance|strength|defence|defense|levels?|movement(?:\s+points?)?|agility|speed)/gi;
       let pm;
-      while ((pm = pairRe.exec(line)) !== null) {
+      let found = false;
+      while ((pm = pairRe.exec(src)) !== null) {
         const amt = parseAmount(pm[1]);
         const stat = normalizeStat(pm[2]);
-        if (stat && amt) {
-          const lose = /loses?|lost/i.test(line);
-          addStat(stat, lose ? -amt : amt);
-        }
+        if (!stat || !amt) continue;
+        const around = src.slice(Math.max(0, pm.index - 70), pm.index + pm[0].length);
+        const verbs = around.match(/\b(gains?|gained|increased|went up|loses?|lost|decreased|went down)\b/gi) || [];
+        const lastVerb = verbs.length ? verbs[verbs.length - 1] : 'gains';
+        const lose = /lose|lost|decreased|went down/i.test(lastVerb);
+        addStat(stat, lose ? -amt : amt);
+        found = true;
+      }
+      if (!found && /increased|went up|looks stronger|feel stronger/i.test(line) && !/\blost\b|\blose/i.test(line)) {
+        if (/strength|attack/i.test(text)) addStat('strength', 1);
+        if (/defence|defense/i.test(text)) addStat('defence', 1);
+        if (/hit\s*point|health|endurance/i.test(text)) addStat('hp', 1);
+        if (/\blevel/i.test(text)) addStat('level', 1);
       }
     });
   }
@@ -701,7 +776,7 @@
       processKitchen();
       processLab();
       scanPageForGains();
-    }, 600);
+    }, 300);
 
     processInvUse();
     processWheelPrize();
@@ -728,17 +803,12 @@
     }, 4000);
 
     setInterval(() => {
-      const boxes = document.querySelectorAll('#invResult, .invResult, .togglePopup__2020.invResult');
-      let any = false;
-      boxes.forEach((box) => {
-        if (box.offsetParent !== null && (!window.getComputedStyle || getComputedStyle(box).display !== 'none')) any = true;
-      });
-      if (!any) {
+      if (!collectUsePopups().length) {
         [...processedThisSession].forEach((k) => {
           if (String(k).indexOf('invuse|') === 0) processedThisSession.delete(k);
         });
       }
-    }, 1200);
+    }, 800);
 
     console.log('%c[DarthyPrime Stats] Active – scanning for gains', 'color:#7dd3fc;font-weight:bold');
   }
