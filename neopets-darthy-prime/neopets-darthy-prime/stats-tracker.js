@@ -9,8 +9,17 @@
 
   // Will be set after storage ready
   let PET_NAME = 'Darthenvy';
-  let STORAGE_KEY, START_DATE_KEY, LOG_KEY, LOG_DATE_KEY;
+  let STORAGE_KEY, START_DATE_KEY, LOG_KEY, LOG_DATE_KEY, SOURCE_KEY;
   let stats = { level: 0, hp: 0, strength: 0, defence: 0 };
+  const SOURCE_KEYS = ['re', 'kq', 'lab', 'training', 'food'];
+  const SOURCE_LABELS = { re: 'RE', kq: 'KQ', lab: 'Lab', training: 'Training', food: 'Food' };
+  const SOURCE_COLORS = { re: '#a78bfa', kq: '#fbbf24', lab: '#38bdf8', training: '#4ade80', food: '#fb7185' };
+  function emptySources() {
+    const o = {};
+    SOURCE_KEYS.forEach(k => { o[k] = 0; });
+    return o;
+  }
+  let statSources = emptySources();
   const processedThisSession = new Set();
 
   const wordToNumber = {
@@ -102,9 +111,30 @@
     } catch (_) {}
   }
 
-  function addStat(stat, amount) {
+  function inferStatSource() {
+    const u = (location.href || '').toLowerCase();
+    if (u.includes('kitchen')) return 'kq';
+    if (u.includes('lab.phtml') || u.includes('/lab') || u.includes('lab2')) return 'lab';
+    if (u.includes('fight_training') || u.includes('training.phtml') || u.includes('academy.phtml') || u.includes('process_training') || u.includes('process_academy') || u.includes('process_fight')) return 'training';
+    if (u.includes('inventory') || u.includes('safetydeposit') || u.includes('/home')) return 'food';
+    if (u.includes('quests.phtml')) return 'training';
+    return 're';
+  }
+  function saveSources() {
+    if (!SOURCE_KEY) return;
+    GM_setValue(SOURCE_KEY, statSources);
+  }
+  function addSource(source, amount) {
+    if (!amount) return;
+    const key = SOURCE_KEYS.includes(source) ? source : inferStatSource();
+    statSources[key] = (parseInt(statSources[key], 10) || 0) + amount;
+    if (statSources[key] < 0) statSources[key] = 0;
+    saveSources();
+  }
+  function addStat(stat, amount, source) {
     if (!stats.hasOwnProperty(stat)) return;
     stats[stat] += amount;
+    addSource(source || inferStatSource(), amount);
     if (typeof GM_addStat === 'function') {
       GM_addStat(STORAGE_KEY, stat, amount).then((s) => {
         if (s && typeof s === 'object') stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, s);
@@ -674,6 +704,10 @@
           <div style="margin-top:6px;color:#7dd3fc;font-size:12px;" id="stat-days">Tracking for 1 Day</div>
           <div style="margin-top:8px;"><a href="javascript:void(0)" id="reset-stats-btn" style="color:#f87171;font-size:11px;">Reset Totals</a></div>
         </div>
+        <div id="darthy-drop-src-h" style="font-weight:bold;color:#7dd3fc;margin:10px 0 5px;cursor:pointer;user-select:none;">Stat Sources <span class="darthy-caret">▸</span></div>
+        <div id="darthy-drop-src-b" style="display:none;">
+          <div id="darthy-stat-pie" style="display:flex;align-items:center;gap:10px;"></div>
+        </div>
         <div id="shop-profit-anchor"></div>
         <div style="border-top:1px solid #4a4a6a;margin:12px 0 8px;"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
@@ -691,6 +725,8 @@
       e.preventDefault();
       if (confirm(`Reset all tracked stats for ${PET_NAME}?\n\nThis will also reset the day counter to 1 Day.`)) {
         stats = { level: 0, hp: 0, strength: 0, defence: 0 };
+        statSources = emptySources();
+        saveSources();
         GM_setValue(START_DATE_KEY, getTodayLocal());
         processedThisSession.clear();
         saveStats();
@@ -709,6 +745,7 @@
     });
 
     bindDrop('darthy-drop-stats', 'dp_drop_stats');
+    bindDrop('darthy-drop-src', 'dp_drop_src', false);
     bindDrop('darthy-drop-log', 'dp_drop_log');
     updateDropdownStats();
     return true;
@@ -722,7 +759,7 @@
     } catch (_) {}
     return fallback !== false;
   }
-  function bindDrop(id, key) {
+  function bindDrop(id, key, fallback) {
     const h = document.getElementById(id + '-h');
     const b = document.getElementById(id + '-b');
     if (!h || !b) return;
@@ -731,13 +768,49 @@
       const c = h.querySelector('.darthy-caret');
       if (c) c.textContent = open ? '▾' : '▸';
     };
-    apply(dropOpen(key, true));
+    apply(dropOpen(key, fallback !== false));
     h.addEventListener('click', e => {
       e.preventDefault();
       const open = b.style.display === 'none';
       apply(open);
       try { localStorage.setItem(key, open ? '1' : '0'); } catch (_) {}
     });
+  }
+
+  function renderStatPie() {
+    const slices = SOURCE_KEYS.map(k => ({
+      key: k, label: SOURCE_LABELS[k], color: SOURCE_COLORS[k],
+      val: Math.max(0, parseInt(statSources[k], 10) || 0)
+    }));
+    const total = slices.reduce((s, x) => s + x.val, 0);
+    const r = 34, cx = 38, cy = 38;
+    let svg;
+    if (!total) {
+      svg = `<svg width="76" height="76" viewBox="0 0 76 76"><circle cx="${cx}" cy="${cy}" r="${r}" fill="#334155"/></svg>`;
+    } else {
+      let acc = 0;
+      const parts = slices.filter(s => s.val > 0).map(s => {
+        const start = acc / total;
+        acc += s.val;
+        const end = acc / total;
+        const a0 = start * Math.PI * 2 - Math.PI / 2;
+        const a1 = end * Math.PI * 2 - Math.PI / 2;
+        const x0 = cx + r * Math.cos(a0), y0 = cy + r * Math.sin(a0);
+        const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+        const large = (end - start) > 0.5 ? 1 : 0;
+        const mid = (start + end) / 2 * Math.PI * 2 - Math.PI / 2;
+        const tx = cx + r * 0.55 * Math.cos(mid);
+        const ty = cy + r * 0.55 * Math.sin(mid);
+        const label = s.val >= 1 ? `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-size="9" font-weight="bold">${s.val}</text>` : '';
+        if (end - start >= 0.999) return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}"/>${label}`;
+        return `<path d="M ${cx} ${cy} L ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z" fill="${s.color}"/>${label}`;
+      }).join('');
+      svg = `<svg width="76" height="76" viewBox="0 0 76 76">${parts}</svg>`;
+    }
+    const legend = slices.map(s =>
+      `<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#cbd5e1;line-height:1.35;"><span style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0;"></span>${s.label} <span style="color:#94a3b8;">${s.val}</span></div>`
+    ).join('');
+    return `<div>${svg}</div><div>${legend}${total ? '' : '<div style="font-size:10px;color:#64748b;">No sourced stats yet</div>'}</div>`;
   }
 
   function updateDropdownStats() {
@@ -760,6 +833,8 @@
       daysEl.textContent = `Tracking for ${d} Day${d === 1 ? '' : 's'}`;
     }
 
+    const pieEl = document.getElementById('darthy-stat-pie');
+    if (pieEl) pieEl.innerHTML = renderStatPie();
     const logEl = document.getElementById('stats-log');
     if (logEl) {
       const log = getLog();
@@ -844,6 +919,8 @@
       START_DATE_KEY = `neopets_start_date_${PET_NAME.toLowerCase()}`;
       LOG_KEY        = `neopets_log_${PET_NAME.toLowerCase()}`;
       LOG_DATE_KEY   = `neopets_log_date_${PET_NAME.toLowerCase()}`;
+      SOURCE_KEY     = `neopets_stat_sources_${PET_NAME.toLowerCase()}`;
+      statSources = Object.assign(emptySources(), GM_getValue(SOURCE_KEY, {}));
 
       stats = GM_getValue(STORAGE_KEY, {
         level: 0,

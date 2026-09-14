@@ -67,7 +67,7 @@
     if (ncM && /gift|gives?|given|hands you|receive/i.test(text)) {
       const amt = parseAmount(ncM[1]);
       if (amt > 0 && window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-        window.DarthyPrimeStats.addToLog('+' + amt.toLocaleString() + ' NC');
+        window.DarthyPrimeStats.addToLog('You received ' + amt.toLocaleString() + ' NC');
         handled = true;
       }
     }
@@ -84,7 +84,7 @@
           window.DarthyPrimeShop.refreshUI && window.DarthyPrimeShop.refreshUI();
         }
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-          window.DarthyPrimeStats.addToLog('+' + amount.toLocaleString() + ' NP');
+          window.DarthyPrimeStats.addToLog('You received ' + amount.toLocaleString() + ' NP');
         }
         handled = true;
       }
@@ -101,7 +101,7 @@
           window.DarthyPrimeShop.refreshUI && window.DarthyPrimeShop.refreshUI();
         }
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-          window.DarthyPrimeStats.addToLog('−' + amount.toLocaleString() + ' NP');
+          window.DarthyPrimeStats.addToLog(amount.toLocaleString() + ' NP was stolen');
         }
         handled = true;
       }
@@ -116,7 +116,7 @@
       const stat = normalizeStat(sm[3]);
       if (stat && amount) {
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addStat) {
-          window.DarthyPrimeStats.addStat(stat, action * amount);
+          window.DarthyPrimeStats.addStat(stat, action * amount, 're');
         }
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
           window.DarthyPrimeStats.addToLog((action > 0 ? '+' : '−') + amount + ' ' + stat);
@@ -135,10 +135,24 @@
         if (looksLikeItemName(name)) items = [name];
       }
     }
-    if (items.length && (storyGive || items.length)) {
+    items = items.filter(n => !/^(gift|a gift|the gift|item|an item)$/i.test(n));
+    if (!items.length) {
+      const gifted = text.match(/you(?:'ve| have)? been (?:given|gifted)\s+(?:an?\s+)?(?!gift\b)([A-Z][^!?.]{2,70}?)(?:[.!?"']|$)/i) ||
+        text.match(/(?:received|got|found)\s+(?:an?\s+)?([A-Z][^!?.]{2,70}?)(?:[.!?"']|$)/i);
+      if (gifted) {
+        const name = String(gifted[1] || '').replace(/^an?\s+/i, '').trim();
+        if (looksLikeItemName(name)) items = [name];
+      }
+    }
+    if (items.length) {
+      const phrase = /gifted|gives you a gift|been gifted/i.test(text)
+        ? "You've been gifted "
+        : /collected|collect/i.test(text)
+          ? "You've collected "
+          : "You received ";
       items.forEach((name) => {
         if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
-          window.DarthyPrimeStats.addToLog("You've been given " + name);
+          window.DarthyPrimeStats.addToLog(phrase + name);
         }
       });
       handled = true;
@@ -153,7 +167,7 @@
     const n = String(name || '').replace(/\s+/g, ' ').trim();
     if (!n || n.length < 3 || n.length > 70) return false;
     if (/^\d+$/.test(n)) return false;
-    if (/^(np|nc|ok|close|enjoy)$/i.test(n)) return false;
+    if (/^(np|nc|ok|close|enjoy|gift|a gift|the gift|item|an item)$/i.test(n)) return false;
     if (/something has happened|something is happening|take this|fashion is for|unquestioning loyalty|neggery|darling/i.test(n)) return false;
     if (/\b(np|nc)\b/i.test(n) && n.length < 12) return false;
     return true;
