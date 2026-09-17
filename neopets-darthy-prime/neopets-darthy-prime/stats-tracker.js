@@ -207,20 +207,34 @@
       '.invResult',
       '.togglePopup__2020.invResult',
       '.togglePopup__2020.movePopup__2020',
+      '.togglePopup__2020',
       '#sdbResult',
       '.sdb-result',
       '#useResult',
       '.popup-body__2020',
       '.inv-result',
-      '[id*="invResult"]'
+      '[id*="invResult"]',
+      '[id*="sdbResult"]',
+      '.popup-header__2020',
+      '#petStatusPopup',
+      '[id*="PetPopup"]',
+      '[id*="petpopup"]',
+      '.hp-popup',
+      '.home-pet-popup',
+      '[class*="invResult"]'
     ];
     sels.forEach((s) => {
       document.querySelectorAll(s).forEach((el) => {
-        const wrap = el.closest('#invResult, .invResult, .togglePopup__2020, .movePopup__2020, #sdbResult') || el;
-        found.add(wrap);
+        const wrap = el.closest('#invResult, .invResult, .togglePopup__2020, .movePopup__2020, #sdbResult, .popup__2020') ||
+          (el.classList && el.classList.contains('popup-header__2020') ? el.parentElement : el);
+        if (wrap) found.add(wrap);
       });
     });
-    return Array.from(found).filter(popupIsOpen);
+    return Array.from(found).filter((el) => {
+      if (!popupIsOpen(el)) return false;
+      const t = (el.innerText || el.textContent || '');
+      return /success|gains?|gained|loses?|lost|increased|hit\s*points?|strength|defence|wow!|snegg|potion/i.test(t);
+    });
   }
 
   function extractUseGainLine(box, text) {
@@ -283,7 +297,11 @@
       if (!line) return;
       if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense|level/i.test(line)) return;
 
-      const key = 'invuse|' + line.toLowerCase();
+      const sig = line.toLowerCase() + '|' + String(window.__darthyFoodGen || 0);
+      const prev = box.getAttribute('data-darthy-foodsig') || '';
+      if (prev === sig) return;
+      box.setAttribute('data-darthy-foodsig', sig);
+      const key = 'invuse|' + sig;
       if (processedThisSession.has(key)) return;
       processedThisSession.add(key);
 
@@ -864,6 +882,31 @@
 
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
+    const onFoodPages = /inventory|safetydeposit|\/home|quickref|useobject|\/pets/i.test(url);
+    window.__darthyFoodGen = window.__darthyFoodGen || 0;
+    function bumpFoodGen() {
+      window.__darthyFoodGen += 1;
+      document.querySelectorAll('[data-darthy-foodsig]').forEach((el) => {
+        try { el.removeAttribute('data-darthy-foodsig'); } catch (_) {}
+      });
+    }
+    function burstFoodScan() {
+      bumpFoodGen();
+      let n = 0;
+      const iv = setInterval(() => {
+        processInvUse();
+        if (++n >= 40) clearInterval(iv);
+      }, 120);
+    }
+    document.addEventListener('click', (ev) => {
+      const t = ev.target && ev.target.closest && ev.target.closest('button, a, input, [onclick], li, .item, [class*="inv"], [class*="sdb"]');
+      if (!t) return;
+      const label = ((t.textContent || t.value || t.getAttribute('title') || t.getAttribute('aria-label') || '') + ' ' + (t.className || '')).toLowerCase();
+      if (/use|feed|give|eat|apply|potion|item|inv-|sdb-|checkactivepet|hp-carousel-pet/i.test(label) || t.closest('.hp-carousel-pet, .inv-item, .sdb-item, #invResult')) {
+        burstFoodScan();
+      }
+    }, true);
+
     setInterval(() => {
       processInvUse();
       processWheelPrize();
@@ -871,7 +914,7 @@
       processKitchen();
       processLab();
       scanPageForGains();
-    }, 300);
+    }, onFoodPages ? 150 : 300);
 
     processInvUse();
     processWheelPrize();
