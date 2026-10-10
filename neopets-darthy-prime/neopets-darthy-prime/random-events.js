@@ -57,10 +57,17 @@
 
     const lower = text.toLowerCase();
 
+    if (/start reading that straight away|get me more books|vanishes in a puff|read to pet/i.test(text)) return;
     const isRE = /something has happened|something is happening/i.test(text);
     if (!isRE) return;
 
     let handled = false;
+
+    const av = text.match(/You are now eligible to use\s+['‘’"]?[^'‘’"\n]+['‘’"]?\s+as an avatar[!.]?/i);
+    if (av && window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+      window.DarthyPrimeStats.addToLog(av[0].replace(/\s+/g, ' ').trim());
+      handled = true;
+    }
 
     // NC (not NP profit)
     const ncM = text.match(/\b([\d,]+)\s*NC\b/i);
@@ -108,7 +115,7 @@
     }
 
     // Stat changes
-    const statRe = /(?:your|the)?\s*(?:pet\s+)?([A-Za-z][A-Za-z0-9_]+)?\s*(?:gains?|loses?|gained|lost)\s+(\d+|one|two|three|four|five|six)\s+(strength|defence|defense|hit\s*points?|health|endurance|levels?)/gi;
+    const statRe = /(?:your|the)?\s*(?:pet\s+)?([A-Za-z][A-Za-z0-9_]+)?\s*(?:gains?|loses?|gained|lost|has become better at|becomes better at)\s+(\d+|one|two|three|four|five|six)?\s*(strength|defence|defense|hit\s*points?|health|endurance|levels?|attack|agility)/gi;
     let sm;
     while ((sm = statRe.exec(text)) !== null) {
       const action = /lose|lost/i.test(sm[0]) ? -1 : 1;
@@ -163,13 +170,30 @@
     }
   }
 
+  function identityNames() {
+    const names = [];
+    try {
+      if (window.DarthyPrimeStats && window.DarthyPrimeStats.getPetName) names.push(window.DarthyPrimeStats.getPetName());
+      if (window.DarthyPrimeStats && window.DarthyPrimeStats.getUserName) names.push(window.DarthyPrimeStats.getUserName());
+    } catch (_) {}
+    try {
+      if (typeof GM_getValue === 'function') {
+        names.push(GM_getValue('darthy_pet_name', ''));
+        names.push(GM_getValue('darthy_username', ''));
+      }
+    } catch (_) {}
+    return names.map(n => String(n || '').trim().toLowerCase()).filter(Boolean);
+  }
   function looksLikeItemName(name) {
     const n = String(name || '').replace(/\s+/g, ' ').trim();
     if (!n || n.length < 3 || n.length > 70) return false;
+    if (identityNames().indexOf(n.toLowerCase()) !== -1) return false;
     if (/^\d+$/.test(n)) return false;
     if (/^(np|nc|ok|close|enjoy|gift|a gift|the gift|item|an item)$/i.test(n)) return false;
     if (/something has happened|something is happening|take this|fashion is for|unquestioning loyalty|neggery|darling/i.test(n)) return false;
     if (/\b(np|nc)\b/i.test(n) && n.length < 12) return false;
+    if (/^[\d,]+$/.test(n)) return false;
+    if (/confirm purchase|wish to buy|keep shopping|cancel buy/i.test(n)) return false;
     return true;
   }
 
@@ -203,6 +227,7 @@
       if (!/something has happened|something is happening/i.test(head) &&
           !/something has happened|something is happening/i.test(t)) return;
       if (/up for auction|start price \(np\)|minimum increment/i.test(t)) return;
+      if (/confirm purchase|are you sure you wish to buy|keep shopping/i.test(t)) return;
       const snippet = t.slice(0, 360);
       chunks.push({
         text: /something has happened|something is happening/i.test(snippet)

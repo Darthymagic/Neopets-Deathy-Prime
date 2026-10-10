@@ -13,6 +13,8 @@
   const SHOP_NAME_KEY = 'darthy_shop_name';
   const TRACK_TEXT_KEY = 'darthy_shop_track_text';
   const TRACK_COUNTS_KEY = 'darthy_shop_track_counts'; // { "negg": { name: "Negg", target: 4, sold: 2 }, ... }
+  const ITEM_SALES_KEY = 'darthy_item_sales'; // { "negg": { name: "Negg", qty: 4, np: 120000 } }
+  const WEEK_KEY = 'darthy_weekly_profit';
 
   function parsePrice(text) {
     if (!text) return 0;
@@ -40,7 +42,7 @@
       GM_addValue(PROFIT_KEY, amount).then((t) => {
         try { chrome.runtime.sendMessage({ type: 'shop-profit-updated', total: t }).catch(() => {}); } catch (_) {}
         updateFinanceUI();
-      }).catch(() => {});
+      });
       return getProfit() + amount;
     }
     const t = getProfit() + amount;
@@ -130,6 +132,138 @@
     setTrackText(rawText);
     setTrackCounts(next);
     return next;
+  }
+
+
+  function getItemSales() {
+    return GM_getValue(ITEM_SALES_KEY, {}) || {};
+  }
+  function setItemSales(obj) {
+    GM_setValue(ITEM_SALES_KEY, obj || {});
+  }
+  function recordItemSales(sales) {
+    if (!sales || !sales.length) return;
+    const book = getItemSales();
+    const weeks = GM_getValue(WEEK_KEY, {}) || {};
+    sales.forEach(sale => {
+      const key = normalizeItemName(sale.item);
+      if (!key) return;
+      const entry = book[key] || { name: sale.item, qty: 0, np: 0 };
+      entry.name = entry.name || sale.item;
+      entry.qty = (parseInt(entry.qty, 10) || 0) + 1;
+      entry.np = (parseInt(entry.np, 10) || 0) + (parseInt(sale.price, 10) || 0);
+      book[key] = entry;
+      const wk = weekKey(sale.date);
+      const w = weeks[wk] || { np: 0, qty: 0 };
+      w.np += parseInt(sale.price, 10) || 0;
+      w.qty += 1;
+      weeks[wk] = w;
+    });
+    setItemSales(book);
+    GM_setValue(WEEK_KEY, weeks);
+    renderTopSellers();
+  }
+  function brisbaneToday() {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).split('-');
+    return new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]));
+  }
+  function parseSaleDate(text) {
+    const m = String(text || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) return brisbaneToday();
+    return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+  }
+  function mondayOf(date) {
+    const d = new Date(date.getTime());
+    const day = d.getUTCDay();
+    const back = day === 0 ? 6 : day - 1;
+    d.setUTCDate(d.getUTCDate() - back);
+    return d;
+  }
+  function weekKey(text) {
+    const d = mondayOf(parseSaleDate(text));
+    return d.toISOString().slice(0, 10);
+  }
+  function weekLabel(key) {
+    const d = new Date(key + 'T00:00:00Z');
+    return d.getUTCDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()];
+  }
+  function weekSeries() {
+    const stored = GM_getValue(WEEK_KEY, {}) || {};
+    const keys = Object.keys(stored).sort();
+    const start = mondayOf(keys.length ? new Date(keys[0] + 'T00:00:00Z') : brisbaneToday());
+    const end = mondayOf(brisbaneToday());
+    const out = [];
+    for (let d = new Date(start.getTime()); d <= end; d.setUTCDate(d.getUTCDate() + 7)) {
+      const key = d.toISOString().slice(0, 10);
+      out.push({ key: key, label: weekLabel(key), np: (stored[key] && stored[key].np) || 0, qty: (stored[key] && stored[key].qty) || 0 });
+    }
+    return out;
+  }
+  function renderWeekChart() {
+    const weeks = weekSeries();
+    if (!weeks.length) return '<div style="color:#64748b;font-size:11px;padding:8px;">No weeks yet.</div>';
+    const max = Math.max(1, ...weeks.map(w => w.np));
+    const cols = weeks.map(w => {
+      const up = w.np > 0;
+      const h = up ? Math.max(18, Math.round((w.np / max) * 92)) : 14;
+      const color = up ? '#16a34a' : '#dc2626';
+      const tip = up ? (w.np.toLocaleString() + ' NP · ' + w.qty + ' sold') : 'No sales';
+      return '<div title="' + tip + '" style="flex:0 0 42px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:128px;">' +
+        '<div style="font-size:8px;color:#94a3b8;margin-bottom:3px;white-space:nowrap;">' + (up ? Math.round(w.np / 1000) + 'k' : '0') + '</div>' +
+        '<div style="width:16px;height:' + h + 'px;background:' + color + ';border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.35);"></div>' +
+        '<div style="width:1px;height:8px;background:' + color + ';"></div>' +
+        '<div style="font-size:8px;color:#cbd5e1;margin-top:4px;white-space:nowrap;">' + w.label + '</div></div>';
+    }).join('');
+    return '<div style="font-size:10px;color:#94a3b8;margin:2px 0 6px;">Weekly profit · new candle each Monday · green = sales · red = none</div>' +
+      '<div style="overflow-x:auto;overflow-y:hidden;border:1px solid #1e293b;border-radius:8px;background:#020617;padding:8px 6px 4px;">' +
+      '<div style="display:flex;align-items:flex-end;gap:6px;min-width:max-content;">' + cols + '</div></div>';
+  }
+  function topSellers(limit) {
+    return Object.values(getItemSales())
+      .filter(e => e && e.name)
+      .sort((a, b) => (b.np || 0) - (a.np || 0) || (b.qty || 0) - (a.qty || 0))
+      .slice(0, limit || 25);
+  }
+  function renderTopSellers() {
+    const body = document.getElementById('darthy-top-sellers-body');
+    if (!body) return;
+    const rows = topSellers(25);
+    const all = Object.keys(getItemSales()).length;
+    const chart = renderWeekChart();
+    if (!rows.length) {
+      body.innerHTML = chart + '<div style="color:#64748b;font-size:11px;padding:8px;">No sales recorded yet. Process Shop History to add them.</div>';
+      return;
+    }
+    const head = '<div style="display:grid;grid-template-columns:28px 1fr 70px 110px;gap:6px;font-size:10px;color:#94a3b8;padding:4px 2px;border-bottom:1px solid #334155;"><span>#</span><span>Item</span><span style="text-align:right;">Qty</span><span style="text-align:right;">Total NP</span></div>';
+    const lines = rows.map((e, i) =>
+      '<div style="display:grid;grid-template-columns:28px 1fr 70px 110px;gap:6px;font-size:11px;padding:5px 2px;border-bottom:1px solid #1e293b;">' +
+      '<span style="color:#64748b;">' + (i + 1) + '</span>' +
+      '<span style="word-break:break-word;">' + escapeHtml(e.name) + '</span>' +
+      '<span style="text-align:right;color:#7dd3fc;">' + (e.qty || 0).toLocaleString() + '</span>' +
+      '<span style="text-align:right;color:#4ade80;">' + (e.np || 0).toLocaleString() + '</span></div>'
+    ).join('');
+    body.innerHTML = chart + '<div style="font-size:10px;color:#94a3b8;margin:8px 0 6px;">Top 25 by NP made. Tracking ' + all + ' item' + (all === 1 ? '' : 's') + '.</div>' + head + lines;
+  }
+  function mountTopSellers() {
+    if (document.getElementById('darthy-top-sellers')) {
+      renderTopSellers();
+      return;
+    }
+    const nav = document.querySelector('nav.mkt-subnav');
+    if (!nav || !nav.parentNode) return;
+    const box = document.createElement('div');
+    box.id = 'darthy-top-sellers';
+    box.style.cssText = 'margin:10px auto 6px;max-width:720px;background:#0f172a;color:#e2e8f0;border:2px solid #fbbf24;border-radius:10px;font-family:Verdana,Arial,sans-serif;box-sizing:border-box;';
+    box.innerHTML = '<button type="button" id="darthy-top-sellers-toggle" style="width:100%;text-align:left;background:transparent;color:#fbbf24;border:none;padding:10px 12px;font-weight:bold;cursor:pointer;font-size:13px;">Top sellers ▸</button><div id="darthy-top-sellers-body" style="display:none;max-height:520px;overflow:auto;padding:0 12px 10px;"></div>';
+    nav.parentNode.insertBefore(box, nav.nextSibling);
+    const toggle = box.querySelector('#darthy-top-sellers-toggle');
+    const body = box.querySelector('#darthy-top-sellers-body');
+    toggle.onclick = () => {
+      const open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      toggle.textContent = open ? 'Top sellers ▸' : 'Top sellers ▾';
+    };
+    renderTopSellers();
   }
 
   function applySalesToTrackList(sales) {
@@ -451,9 +585,20 @@
       <div style="font-size:10px;color:#94a3b8;margin-bottom:8px;line-height:1.35;">
         Items that hit their track target. Restock in your shop, then click Stocked.
       </div>
-      <div id="darthy-track-soldout" style="background:#1c0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:6px 8px;max-height:320px;overflow-y:auto;min-height:80px;"></div>
+      <div id="darthy-track-soldout" style="background:#1c0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:6px 8px;max-height:220px;overflow-y:auto;min-height:80px;"></div>
       <button id="darthy-track-stocked" style="margin-top:10px;width:100%;background:#16a34a;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">Stocked</button>
-      <div style="font-size:10px;color:#64748b;margin-top:6px;text-align:center;">Resets sold counters so tracking starts again.</div>
+      <div style="font-size:10px;color:#64748b;margin-top:6px;text-align:center;">Resets sold counters, then pulls those items from SDB into your shop.</div>
+      <button id="darthy-nostock-toggle" style="margin-top:10px;width:100%;background:#334155;color:#e2e8f0;border:none;padding:6px;border-radius:6px;font-size:11px;cursor:pointer;">No Stock in SDB ▸</button>
+      <div id="darthy-nostock-wrap" style="display:none;margin-top:6px;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.35;">Items not found in SDB (with qty). Backspace a line and Save to remove. Retry pulls this list from SDB again.</div>
+        <textarea id="darthy-nostock-textarea" spellcheck="false"
+          style="width:100%;height:90px;resize:vertical;overflow:auto;box-sizing:border-box;background:#0f172a;color:#fca5a5;border:1px solid #7f1d1d;border-radius:6px;padding:6px;font-size:11px;font-family:Verdana,monospace;line-height:1.35;"></textarea>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button id="darthy-nostock-save" style="flex:1;background:#b45309;color:white;border:none;padding:6px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">Save No Stock list</button>
+          <button id="darthy-nostock-retry" style="flex:1;background:#2563eb;color:white;border:none;padding:6px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">Retry</button>
+        </div>
+        <div id="darthy-nostock-status" style="font-size:10px;color:#4ade80;min-height:14px;margin-top:3px;text-align:center;"></div>
+      </div>
     `;
 
     layout.appendChild(left);
@@ -480,15 +625,78 @@
         alert('Nothing is sold out right now.');
         return;
       }
-      if (!confirm(`Mark ${soldOut.length} sold-out item(s) as restocked and start tracking again?`)) return;
+      if (!confirm(`Mark ${soldOut.length} sold-out item(s) as restocked, then pull them from SDB into your shop?`)) return;
+      const textQty = {};
+      String(getTrackText() || '').split(/\r?\n/).forEach(line => {
+        const p = parseTrackLine(line);
+        if (!p) return;
+        textQty[normalizeItemName(p.name)] = p.target;
+      });
+      const snapshot = soldOut.map(e => {
+        const key = normalizeItemName(e.name);
+        const qty = textQty[key] != null ? textQty[key] : 1;
+        return { name: e.name, target: qty, qty: qty };
+      });
       const n = restockSoldOut();
       renderTrackPanels();
       const st = document.getElementById('darthy-track-save-status');
-      if (st) {
-        st.textContent = `Restocked ${n} item(s) ✓`;
-        setTimeout(() => { st.textContent = ''; }, 2000);
+      if (window.DarthyPrimeRestock && typeof window.DarthyPrimeRestock.start === 'function') {
+        if (st) {
+          st.textContent = `Restocked ${n} item(s) ✓ — opening SDB…`;
+          setTimeout(() => { st.textContent = ''; }, 2500);
+        }
+        window.DarthyPrimeRestock.start(snapshot);
+      } else if (st) {
+        st.textContent = `Marked ${n} item(s) stocked ✓`;
+        setTimeout(() => { st.textContent = ''; }, 2500);
       }
     };
+
+    const nsToggle = right.querySelector('#darthy-nostock-toggle');
+    const nsWrap = right.querySelector('#darthy-nostock-wrap');
+    const nsTa = right.querySelector('#darthy-nostock-textarea');
+    if (nsTa && window.DarthyPrimeRestock) {
+      nsTa.value = (window.DarthyPrimeRestock.getNoStock() || []).join('\n');
+    }
+    if (nsToggle && nsWrap) {
+      nsToggle.onclick = () => {
+        const open = nsWrap.style.display !== 'none';
+        nsWrap.style.display = open ? 'none' : 'block';
+        nsToggle.textContent = open ? 'No Stock in SDB ▸' : 'No Stock in SDB ▾';
+      };
+    }
+    const nsSave = right.querySelector('#darthy-nostock-save');
+    if (nsSave) {
+      nsSave.onclick = () => {
+        const raw = (document.getElementById('darthy-nostock-textarea') || {}).value || '';
+        const names = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        if (window.DarthyPrimeRestock) window.DarthyPrimeRestock.setNoStock(names);
+        const st = document.getElementById('darthy-nostock-status');
+        if (st) {
+          st.textContent = 'Saved ✓';
+          setTimeout(() => { st.textContent = ''; }, 1600);
+        }
+      };
+    }
+    const nsRetry = right.querySelector('#darthy-nostock-retry');
+    if (nsRetry) {
+      nsRetry.onclick = () => {
+        const ta = document.getElementById('darthy-nostock-textarea');
+        if (ta && window.DarthyPrimeRestock) {
+          const names = String(ta.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          window.DarthyPrimeRestock.setNoStock(names);
+        }
+        const list = window.DarthyPrimeRestock ? window.DarthyPrimeRestock.getNoStock() : [];
+        if (!list || !list.length) {
+          alert('No Stock list is empty.');
+          return;
+        }
+        if (!confirm('Retry SDB restock for ' + list.length + ' item(s) on the No Stock list?')) return;
+        if (window.DarthyPrimeRestock && typeof window.DarthyPrimeRestock.startFromNoStock === 'function') {
+          window.DarthyPrimeRestock.startFromNoStock();
+        }
+      };
+    }
 
     if (getTrackText() && !Object.keys(getTrackCounts()).length) {
       saveTrackListFromText(getTrackText());
@@ -574,6 +782,7 @@
     if (ta) saveTrackListFromText(ta.value);
 
     const trackResult = applySalesToTrackList(sales);
+    recordItemSales(sales);
     const newTotal = addProfit(total);
     const summary = sales.length === 1
       ? `Added ${formatNP(total)} from 1 sale.`
@@ -679,7 +888,7 @@
       injectProfitDisplay(notice || document.getElementById('darthy-sales-center'));
     }
 
-    console.log('%c[DarthyPrime Shop] Panels on ' + (table ? 'sales table' : '1000 NP notice'), 'color:#fbbf24;font-weight:bold');
+    mountTopSellers();
   }
 
   /** Fallback if the static notice isn't found */

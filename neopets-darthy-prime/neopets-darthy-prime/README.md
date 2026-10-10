@@ -4,8 +4,10 @@ A Chrome extension for Neopets (also works in Edge, Brave, and Opera).
 
 ## Modules
 
-- Stats Tracker
+- Stats Tracker (food, training, Kitchen Quest, Lab, and random-event sources)
+- Stat source pie chart
 - Shop Profit / Spending Tracker
+- Shop history top sellers and weekly profit candles
 - Random Events
 - Shop Inventory
 - Training Helper

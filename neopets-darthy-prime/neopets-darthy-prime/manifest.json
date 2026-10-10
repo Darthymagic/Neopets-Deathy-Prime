@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Neopets Darthy Prime",
-  "version": "1.4.32",
-  "description": "Neopets Darthy Prime: Stats, Notifications, Shop tools, Shop Mimic, ShopWiz Pro, Home pets grid, Random Events.",
+  "version": "1.5.0",
+  "description": "Neopets Darthy Prime: Stats, pie chart, shop profit and top sellers, notifications, ShopWiz, stamps, random events.",
   "author": "Darthy",
   "permissions": [
     "storage",

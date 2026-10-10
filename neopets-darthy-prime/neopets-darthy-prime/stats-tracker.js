@@ -9,6 +9,7 @@
 
   // Will be set after storage ready
   let PET_NAME = 'Darthenvy';
+  let USER_NAME = '';
   let STORAGE_KEY, START_DATE_KEY, LOG_KEY, LOG_DATE_KEY, SOURCE_KEY;
   let stats = { level: 0, hp: 0, strength: 0, defence: 0 };
   const SOURCE_KEYS = ['re', 'kq', 'lab', 'training', 'food'];
@@ -69,9 +70,6 @@
       .trim();
   }
 
-  function onAuctionPage() {
-    return /auction/i.test(location.pathname + location.href);
-  }
   function isJunkLogLine(s) {
     const t = String(s || '').replace(/\s+/g, ' ').trim();
     if (!t) return true;
@@ -80,7 +78,19 @@
     if (/\berror\b/i.test(t) && /\bOK\b/.test(t)) return true;
     if (/^error\b/i.test(t) && t.length < 80) return true;
     if (/up for auction|start price|minimum increment|auction length|neofriends only|guild members only|put into auction|successfully been put into auction/i.test(t)) return true;
+    if (/confirm purchase|are you sure you wish to buy|keep shopping|cancel buy|buying\u2026|buying\.\.\./i.test(t)) return true;
+    if (/you bought\b/i.test(t) && /you spent\b|added to your inventory/i.test(t)) return true;
+    if (/^purchased!?/i.test(t) || /it has been added to your inventory/i.test(t)) return true;
+    if (/^you spent\s+[\d,]+\s*np/i.test(t)) return true;
+    if (/start reading that straight away|get me more books|vanishes in a puff|read to pet|customise\b|into your closet|puff of (?:green|purple|blue|red|pink|orange|yellow|white|black) smoke/i.test(t)) return true;
+    if (/type\s+\w+\s+scroll|rarity\s+\d+|est value|weight\s+[\d.]+\s*lbs/i.test(t)) return true;
+    if (/loading\.{0,3}$/i.test(t)) return true;
+    if (/lose and refresh|close and refresh/i.test(t) && t.length > 80) return true;
     return false;
+  }
+
+  function onAuctionPage() {
+    return /auction/i.test(location.pathname + location.href);
   }
 
   function addToLog(message) {
@@ -111,30 +121,25 @@
     } catch (_) {}
   }
 
-  function inferStatSource() {
-    const u = (location.href || '').toLowerCase();
-    if (u.includes('kitchen')) return 'kq';
-    if (u.includes('lab.phtml') || u.includes('/lab') || u.includes('lab2')) return 'lab';
-    if (u.includes('fight_training') || u.includes('training.phtml') || u.includes('academy.phtml') || u.includes('process_training') || u.includes('process_academy') || u.includes('process_fight')) return 'training';
-    if (u.includes('inventory') || u.includes('safetydeposit') || u.includes('/home')) return 'food';
-    if (u.includes('quests.phtml')) return 'training';
-    return 're';
-  }
   function saveSources() {
     if (!SOURCE_KEY) return;
     GM_setValue(SOURCE_KEY, statSources);
   }
   function addSource(source, amount) {
-    if (!amount) return;
-    const key = SOURCE_KEYS.includes(source) ? source : inferStatSource();
-    statSources[key] = (parseInt(statSources[key], 10) || 0) + amount;
+    if (!amount || !SOURCE_KEY) return;
+    const key = SOURCE_KEYS.includes(source) ? source : '';
+    if (!key) return;
+    const stored = GM_getValue(SOURCE_KEY, {}) || {};
+    statSources = Object.assign(emptySources(), stored, statSources);
+    statSources[key] = (parseInt(stored[key], 10) || 0) + amount;
     if (statSources[key] < 0) statSources[key] = 0;
     saveSources();
+    updateDropdownStats();
   }
   function addStat(stat, amount, source) {
     if (!stats.hasOwnProperty(stat)) return;
     stats[stat] += amount;
-    addSource(source || inferStatSource(), amount);
+    if (source) addSource(source, amount);
     if (typeof GM_addStat === 'function') {
       GM_addStat(STORAGE_KEY, stat, amount).then((s) => {
         if (s && typeof s === 'object') stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, s);
@@ -162,23 +167,22 @@
    * profile dropdown that contains it.
    */
   function getScannableText() {
-    const excludeIds = ['neopets-stats-section', 'navprofiledropdown__2020', 'darthy-shop-profit-panel'];
+    const excludeIds = ['neopets-stats-section', 'navprofiledropdown__2020', 'darthy-shop-profit-panel', 'bsp-buy-popup', 'bsp-buy-confirm-popup', 'bsp-buy-success-popup', 'petCare', 'petCareDesc'];
+    const seen = new Set();
     const excluded = [];
-
-    // Temporarily hide excluded nodes so their text is not included
-    excludeIds.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) {
-        excluded.push({ el, display: el.style.display });
-        el.style.display = 'none';
-      }
-    });
+    function hideOnce(el) {
+      if (!el || seen.has(el) || el.id === 'dcarePanel') return;
+      seen.add(el);
+      excluded.push({ el, display: el.style.display });
+      el.style.display = 'none';
+    }
+    excludeIds.forEach(id => hideOnce(document.getElementById(id)));
+    document.querySelectorAll('.bsp-popup, .bsp-popup__body, .bsp-popup__copy, #bsp-buy-popup, [id*="bsp-buy"], #petCare, .petCare-itemgrid').forEach(hideOnce);
 
     let text = '';
     try {
       text = document.body.innerText || document.body.textContent || '';
     } finally {
-      // Restore
       excluded.forEach(({ el, display }) => {
         el.style.display = display;
       });
@@ -281,10 +285,11 @@
       return;
     }
     boxes.forEach((box) => {
+      if (box.closest && (box.closest('#petCare') || box.closest('#dcarePanel') || box.id === 'petCare')) return;
       const raw = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
       const text = stripHungerText(raw);
       if (!text || text.length < 6) return;
-      if (typeof isJunkLogLine === 'function' && (isJunkLogLine(text) || isJunkLogLine(typeof raw !== 'undefined' ? raw : text))) return;
+      if (isJunkLogLine(text) || isJunkLogLine(raw)) return;
       if (/you bought|you spent|has been added to your inventory/i.test(text) &&
           !/gains?|gained|increased|went up|loses?|lost/i.test(text)) return;
       if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense/i.test(text)) return;
@@ -308,6 +313,7 @@
       addToLog(line);
 
       const src = line + ' ';
+      const foodSource = 'food';
       const pairRe = /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(hit\s*points?|health|endurance|strength|defence|defense|levels?|movement(?:\s+points?)?|agility|speed)/gi;
       let pm;
       let found = false;
@@ -319,14 +325,14 @@
         const verbs = around.match(/\b(gains?|gained|increased|went up|loses?|lost|decreased|went down)\b/gi) || [];
         const lastVerb = verbs.length ? verbs[verbs.length - 1] : 'gains';
         const lose = /lose|lost|decreased|went down/i.test(lastVerb);
-        addStat(stat, lose ? -amt : amt);
+        addStat(stat, lose ? -amt : amt, foodSource);
         found = true;
       }
       if (!found && /increased|went up|looks stronger|feel stronger/i.test(line) && !/\blost\b|\blose/i.test(line)) {
-        if (/strength|attack/i.test(text)) addStat('strength', 1);
-        if (/defence|defense/i.test(text)) addStat('defence', 1);
-        if (/hit\s*point|health|endurance/i.test(text)) addStat('hp', 1);
-        if (/\blevel/i.test(text)) addStat('level', 1);
+        if (/strength|attack/i.test(line)) addStat('strength', 1, foodSource);
+        if (/defence|defense/i.test(line)) addStat('defence', 1, foodSource);
+        if (/hit\s*point|health|endurance/i.test(line)) addStat('hp', 1, foodSource);
+        if (/\blevel/i.test(line)) addStat('level', 1, foodSource);
       }
     });
   }
@@ -576,7 +582,7 @@
           if (stat) {
             const bonusMatch = bodyText.match(/SUPER BONUS.*?went up\s+(\d+)\s+points/i);
             const amount = bonusMatch ? parseAmount(bonusMatch[1]) : 1;
-            addStat(stat, amount);
+            addStat(stat, amount, 'training');
           }
         }
       }
@@ -587,7 +593,7 @@
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
           addToLog(PET_NAME + ' gains a level!!');
-          addStat('level', 1);
+          addStat('level', 1, 'training');
         }
       }
     }
@@ -622,10 +628,10 @@
       addToLog(text);
       const lower = text.toLowerCase();
 
-      if (lower.includes('gained a level')) addStat('level', 1);
-      else if (lower.includes('hit point') || lower.includes('health') || lower.includes('endurance')) addStat('hp', 1);
-      else if (lower.includes('attack') || lower.includes('strength') || lower.includes('better at attack')) addStat('strength', 1);
-      else if (lower.includes('defence') || lower.includes('defense') || lower.includes('better at defence')) addStat('defence', 1);
+      if (lower.includes('gained a level')) addStat('level', 1, 'kq');
+      else if (lower.includes('hit point') || lower.includes('health') || lower.includes('endurance')) addStat('hp', 1, 'kq');
+      else if (lower.includes('attack') || lower.includes('strength') || lower.includes('better at attack')) addStat('strength', 1, 'kq');
+      else if (lower.includes('defence') || lower.includes('defense') || lower.includes('better at defence')) addStat('defence', 1, 'kq');
 
       processedThisSession.add(text);
     }
@@ -650,6 +656,7 @@
       // Skip Chef flavor text (not an actual prize line)
       if (/the chef waves his hands/i.test(text)) return;
       if (/faerie quest/i.test(text)) return;
+      if (/confirm purchase|are you sure you wish to buy|keep shopping|you bought|you spent/i.test(text)) return;
       if (/you may collect your prize/i.test(text) && !/(receive|gets?|wins?|found|awarded)/i.test(text.replace(/you may collect your prize/i, ''))) return;
 
       const key = 'kitchen-prize|' + text.toLowerCase();
@@ -693,7 +700,7 @@
       }
 
       const delta = action === 'gains' ? amount : -amount;
-      addStat(stat, delta);
+      addStat(stat, delta, 'lab');
       addToLog(PET_NAME + ' ' + action + ' ' + amount + ' ' + (stat === 'hp' ? 'hit points' : stat));
       processedThisSession.add(text);
     });
@@ -713,7 +720,7 @@
     section.innerHTML = `
       <div style="border-top:1px solid #4a4a6a;margin:10px 12px 6px;"></div>
       <div class="nav-profile-dropdown-text" style="padding:4px 12px 10px;line-height:1.5;">
-        <div id="darthy-drop-stats-h" style="font-weight:bold;color:#7dd3fc;margin-bottom:5px;cursor:pointer;user-select:none;">Stats Tracker · ${PET_NAME} <span class="darthy-caret">▾</span></div>
+        <div id="darthy-drop-stats-h" style="font-weight:bold;color:#7dd3fc;margin-bottom:5px;cursor:pointer;user-select:none;">${USER_NAME || "Username"} - ${PET_NAME} <span class="darthy-caret">▾</span></div>
         <div id="darthy-drop-stats-b">
           <div>Level: <span id="stat-level">0</span></div>
           <div>HP: <span id="stat-hp">0</span></div>
@@ -797,7 +804,9 @@
 
   function renderStatPie() {
     const slices = SOURCE_KEYS.map(k => ({
-      key: k, label: SOURCE_LABELS[k], color: SOURCE_COLORS[k],
+      key: k,
+      label: SOURCE_LABELS[k],
+      color: SOURCE_COLORS[k],
       val: Math.max(0, parseInt(statSources[k], 10) || 0)
     }));
     const total = slices.reduce((s, x) => s + x.val, 0);
@@ -820,13 +829,18 @@
         const tx = cx + r * 0.55 * Math.cos(mid);
         const ty = cy + r * 0.55 * Math.sin(mid);
         const label = s.val >= 1 ? `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="middle" dominant-baseline="middle" fill="#0f172a" font-size="9" font-weight="bold">${s.val}</text>` : '';
-        if (end - start >= 0.999) return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}"/>${label}`;
+        if (end - start >= 0.999) {
+          return `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${s.color}"/>${label}`;
+        }
         return `<path d="M ${cx} ${cy} L ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)} Z" fill="${s.color}"/>${label}`;
       }).join('');
       svg = `<svg width="76" height="76" viewBox="0 0 76 76">${parts}</svg>`;
     }
     const legend = slices.map(s =>
-      `<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#cbd5e1;line-height:1.35;"><span style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0;"></span>${s.label} <span style="color:#94a3b8;">${s.val}</span></div>`
+      `<div style="display:flex;align-items:center;gap:5px;font-size:10px;color:#cbd5e1;line-height:1.35;">
+        <span style="width:8px;height:8px;border-radius:2px;background:${s.color};flex-shrink:0;"></span>
+        ${s.label} <span style="color:#94a3b8;">${s.val}</span>
+      </div>`
     ).join('');
     return `<div>${svg}</div><div>${legend}${total ? '' : '<div style="font-size:10px;color:#64748b;">No sourced stats yet</div>'}</div>`;
   }
@@ -853,6 +867,7 @@
 
     const pieEl = document.getElementById('darthy-stat-pie');
     if (pieEl) pieEl.innerHTML = renderStatPie();
+
     const logEl = document.getElementById('stats-log');
     if (logEl) {
       const log = getLog();
@@ -902,11 +917,21 @@
       const t = ev.target && ev.target.closest && ev.target.closest('button, a, input, [onclick], li, .item, [class*="inv"], [class*="sdb"]');
       if (!t) return;
       const label = ((t.textContent || t.value || t.getAttribute('title') || t.getAttribute('aria-label') || '') + ' ' + (t.className || '')).toLowerCase();
-      if (/use|feed|give|eat|apply|potion|item|inv-|sdb-|checkactivepet|hp-carousel-pet/i.test(label) || t.closest('.hp-carousel-pet, .inv-item, .sdb-item, #invResult')) {
-        burstFoodScan();
+      if (/use|feed|give|eat|open|apply|potion|item|inv-|sdb-|hp-carousel|checkactivepet/i.test(label) || onFoodPages) {
+        if (/use|feed|give|eat|apply|potion|item|inv-|sdb-|checkactivepet|hp-carousel-pet/i.test(label) || t.closest('.hp-carousel-pet, .inv-item, .sdb-item, #invResult')) {
+          burstFoodScan();
+        }
       }
     }, true);
 
+    try {
+      const foodObs = new MutationObserver(() => processInvUse());
+      foodObs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+    } catch (_) {}
+    try {
+      const $ = window.jQuery;
+      if ($ && $.fn) $(document).ajaxComplete(() => setTimeout(processInvUse, 200));
+    } catch (_) {}
     setInterval(() => {
       processInvUse();
       processWheelPrize();
@@ -936,6 +961,7 @@
       DarthyPrimeStorage.reload().then(() => {
         const next = GM_getValue(STORAGE_KEY, null);
         if (next && typeof next === 'object') stats = Object.assign({ level: 0, hp: 0, strength: 0, defence: 0 }, next);
+        if (SOURCE_KEY) statSources = Object.assign(emptySources(), GM_getValue(SOURCE_KEY, {}) || {});
         updateDropdownStats();
       }).catch(() => {});
     }, 4000);
@@ -957,6 +983,7 @@
       // Load configurable pet name
       const storedPet = GM_getValue('darthy_pet_name', null);
       if (storedPet) PET_NAME = storedPet;
+      USER_NAME = String(GM_getValue('darthy_username', '') || '').trim();
 
       STORAGE_KEY    = `neopets_stats_${PET_NAME.toLowerCase()}`;
       START_DATE_KEY = `neopets_start_date_${PET_NAME.toLowerCase()}`;
@@ -983,7 +1010,8 @@
     },
     getStats: () => ({ ...stats, pet: PET_NAME }),
     getPetName: () => PET_NAME,
-    addStat: function (stat, amount) { addStat(stat, amount); },
+    addStat: function (stat, amount, source) { addStat(stat, amount, source); },
+    getUserName: () => USER_NAME,
     addToLog: function (line) { addToLog(line); }
   };
 })();
