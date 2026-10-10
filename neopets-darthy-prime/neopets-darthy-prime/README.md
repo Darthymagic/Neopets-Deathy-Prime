@@ -16,6 +16,7 @@ A Chrome extension for Neopets (also works in Edge, Brave, and Opera).
 - Shop Wizard Prime
 - Quest Log Premium check
 - Stamp Album Prime
+- Account Completion (books, gourmet, avatars, stamps)
 - Shop Mimic
 - Home Pets Grid
 - Sidebar (stats, NP, and today’s log)

@@ -1,6 +1,8 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const petInput = document.getElementById('pet-name');
   const shopInput = document.getElementById('shop-name');
+  const readInput = document.getElementById('read-pet');
+  const foodInput = document.getElementById('gourmet-pet');
   const saveBtn = document.getElementById('save-pet');
   const petStatus = document.getElementById('pet-status');
   const resetBtn = document.getElementById('reset-stats');
@@ -18,12 +20,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   const data = await chrome.storage.local.get([
     'darthy_pet_name',
     'darthy_shop_name',
+    'darthy_read_pet',
+    'darthy_gourmet_pet',
     'darthy_shop_profit_total',
     'darthy_spending_total'
   ]);
 
   if (petInput) petInput.value = data.darthy_pet_name || 'Darthenvy';
   if (shopInput) shopInput.value = data.darthy_shop_name || '';
+  if (readInput) readInput.value = data.darthy_read_pet || '';
+  if (foodInput) foodInput.value = data.darthy_gourmet_pet || '';
   if (shopProfitEl) shopProfitEl.textContent = formatNP(data.darthy_shop_profit_total || 0);
   if (shopSpendEl) shopSpendEl.textContent = formatNP(data.darthy_spending_total || 0);
 
@@ -31,6 +37,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     saveBtn.addEventListener('click', async () => {
       const name = (petInput.value || '').trim();
       const shop = (shopInput ? shopInput.value : '').trim();
+      const reader = (readInput ? readInput.value : '').trim();
+      const eater = (foodInput ? foodInput.value : '').trim();
       if (!name) {
         petStatus.textContent = 'Pet name cannot be empty.';
         petStatus.className = 'status err';
@@ -39,6 +47,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       await chrome.storage.local.set({
         darthy_pet_name: name,
         darthy_shop_name: shop,
+        darthy_read_pet: reader,
+        darthy_gourmet_pet: eater,
         darthy_setup_done: true
       });
       petStatus.textContent = `Saved. Pet: "${name}"${shop ? ' · Shop: "' + shop + '"' : ''}. Refresh Neopets tabs.`;

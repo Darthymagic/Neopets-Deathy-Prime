@@ -80,6 +80,10 @@
       window.DarthyPrimeQuestLog.init();
     }
 
+    if (window.DarthyPrimeAccount && typeof window.DarthyPrimeAccount.init === 'function') {
+      window.DarthyPrimeAccount.init();
+    }
+
     injectBadge();
     console.log('%c🐾 Neopets Darthy Prime loaded', 'color:#4a90e2;font-weight:bold;font-size:13px');
   } catch (err) {
