@@ -1048,6 +1048,68 @@
     setTimeout(() => banner.remove(), 2800);
   }
 
+
+  const BANK_KEY = 'darthy_bank_interest_day';
+  function nstDate() {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    } catch (_) { return new Date().toISOString().slice(0, 10); }
+  }
+  function bankInterestAmount() {
+    const btn = document.querySelector('#frmCollectInterest input[type="submit"], input.bank-interest-btn, input[value*="Collect Interest"]');
+    const chunks = [];
+    if (btn) {
+      chunks.push(btn.value || '');
+      const form = btn.closest('form') || btn.parentElement;
+      if (form) chunks.push(form.innerText || form.textContent || '');
+    }
+    chunks.push(document.body.innerText || '');
+    const blob = chunks.join('\n');
+    const patterns = [
+      /collect(?:ed)?\s+interest[^\d]{0,40}([\d,]+)\s*NP/i,
+      /interest[^\d]{0,40}([\d,]+)\s*NP/i,
+      /collected\s+([\d,]+)\s*NP\s+in\s+interest/i,
+      /([\d,]+)\s*NP\s+in\s+interest/i,
+      /Collect Interest\s*\(?\s*([\d,]+)\s*NP/i
+    ];
+    for (const re of patterns) {
+      const m = blob.match(re);
+      if (m) {
+        const n = parseInt(String(m[1]).replace(/,/g, ''), 10);
+        if (n > 0 && n < 50000000) return n;
+      }
+    }
+    return 0;
+  }
+  function addBankInterest(amount, why) {
+    if (!amount || amount <= 0) return false;
+    const day = nstDate();
+    const done = GM_getValue(BANK_KEY, '');
+    if (done === day) return false;
+    GM_setValue(BANK_KEY, day);
+    addProfit(amount);
+    console.log('%c[DarthyPrime] Bank interest +' + amount.toLocaleString() + ' NP', 'color:#4ade80;font-weight:bold');
+    return true;
+  }
+  function startBankInterestWatcher() {
+    if (!/bank\.phtml/i.test(location.href)) return;
+    const btn = document.querySelector('#frmCollectInterest input[type="submit"], input.bank-interest-btn');
+    if (btn && !btn.getAttribute('data-darthy-bank')) {
+      btn.setAttribute('data-darthy-bank', '1');
+      btn.addEventListener('click', () => {
+        const amount = bankInterestAmount();
+        setTimeout(() => addBankInterest(amount || bankInterestAmount(), 'click'), 1800);
+      }, true);
+    }
+    const obs = new MutationObserver(() => {
+      const t = document.body.innerText || '';
+      if (/collected[^\n]{0,40}[\d,]+\s*NP[^\n]{0,40}interest|interest[^\n]{0,40}collected/i.test(t)) {
+        addBankInterest(bankInterestAmount(), 'result');
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+
   function startSpendWatchers() {
     // Initial pass
     tryParseUsershopSpend();
@@ -1103,6 +1165,7 @@
 
       // Spending on usershops + trading post (and any page that shows those success messages)
       startSpendWatchers();
+      startBankInterestWatcher();
     },
     getTotal: getProfit,
     getProfit: getProfit,

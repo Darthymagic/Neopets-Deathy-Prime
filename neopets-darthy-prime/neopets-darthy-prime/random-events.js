@@ -228,6 +228,8 @@
           !/something has happened|something is happening/i.test(t)) return;
       if (/up for auction|start price \(np\)|minimum increment/i.test(t)) return;
       if (/confirm purchase|are you sure you wish to buy|keep shopping/i.test(t)) return;
+      if (/hold on!?|leave the beta|less mobile-friendly|don'?t show me this again/i.test(t)) return;
+      if (el.closest && el.closest('#invResult, .invResult, #petCareResult, #sdb__popup, .sdb-popup')) return;
       const snippet = t.slice(0, 360);
       chunks.push({
         text: /something has happened|something is happening/i.test(snippet)

@@ -12,9 +12,9 @@
   let USER_NAME = '';
   let STORAGE_KEY, START_DATE_KEY, LOG_KEY, LOG_DATE_KEY, SOURCE_KEY;
   let stats = { level: 0, hp: 0, strength: 0, defence: 0 };
-  const SOURCE_KEYS = ['re', 'kq', 'lab', 'training', 'food'];
-  const SOURCE_LABELS = { re: 'RE', kq: 'KQ', lab: 'Lab', training: 'Training', food: 'Food' };
-  const SOURCE_COLORS = { re: '#a78bfa', kq: '#fbbf24', lab: '#38bdf8', training: '#4ade80', food: '#fb7185' };
+  const SOURCE_KEYS = ['re', 'kq', 'lab', 'training', 'food', 'fq'];
+  const SOURCE_LABELS = { re: 'RE', kq: 'KQ', lab: 'Lab', training: 'Training', food: 'Food', fq: 'Faerie Quest' };
+  const SOURCE_COLORS = { re: '#a78bfa', kq: '#fbbf24', lab: '#38bdf8', training: '#4ade80', food: '#fb7185', fq: '#f472b6' };
   function emptySources() {
     const o = {};
     SOURCE_KEYS.forEach(k => { o[k] = 0; });
@@ -86,6 +86,8 @@
     if (/type\s+\w+\s+scroll|rarity\s+\d+|est value|weight\s+[\d.]+\s*lbs/i.test(t)) return true;
     if (/loading\.{0,3}$/i.test(t)) return true;
     if (/lose and refresh|close and refresh/i.test(t) && t.length > 80) return true;
+    if (/hold on!?|leave the beta|less mobile-friendly|don'?t show me this again/i.test(t)) return true;
+    if (/are you sure\?/.test(t) && /yes\b/i.test(t) && !/gains?|hit\s*points?|strength|defence/i.test(t)) return true;
     return false;
   }
 
@@ -209,35 +211,32 @@
     const sels = [
       '#invResult',
       '.invResult',
-      '.togglePopup__2020.invResult',
-      '.togglePopup__2020.movePopup__2020',
-      '.togglePopup__2020',
+      '#petCareResult',
+      '.petCareResult',
+      '#sdb__popup',
+      '.sdb-popup',
       '#sdbResult',
       '.sdb-result',
       '#useResult',
-      '.popup-body__2020',
       '.inv-result',
       '[id*="invResult"]',
-      '[id*="sdbResult"]',
-      '.popup-header__2020',
-      '#petStatusPopup',
-      '[id*="PetPopup"]',
-      '[id*="petpopup"]',
-      '.hp-popup',
-      '.home-pet-popup',
-      '[class*="invResult"]'
+      '[id*="petCareResult"]',
+      '[id*="sdb__popup"]',
+      '[id*="sdbResult"]'
     ];
-    sels.forEach((s) => {
-      document.querySelectorAll(s).forEach((el) => {
-        const wrap = el.closest('#invResult, .invResult, .togglePopup__2020, .movePopup__2020, #sdbResult, .popup__2020') ||
-          (el.classList && el.classList.contains('popup-header__2020') ? el.parentElement : el);
+    sels.forEach((sel) => {
+      document.querySelectorAll(sel).forEach((el) => {
+        const wrap = el.closest('#invResult, .invResult, #petCareResult, .petCareResult, #sdb__popup, .sdb-popup, #sdbResult, .sdb-result') || el;
         if (wrap) found.add(wrap);
       });
     });
     return Array.from(found).filter((el) => {
-      if (!popupIsOpen(el)) return false;
+      if (!el || el.id === 'petCare' || el.id === 'dcarePanel') return false;
+      if (el.closest && el.closest('#neopets-stats-section, #navprofiledropdown__2020')) return false;
+      if (!popupIsOpen(el) && el.style && el.style.display === 'none') return false;
       const t = (el.innerText || el.textContent || '');
-      return /success|gains?|gained|loses?|lost|increased|hit\s*points?|strength|defence|wow!|snegg|potion/i.test(t);
+      if (/hold on!?|leave the beta|less mobile-friendly|don'?t show me this again/i.test(t)) return false;
+      return /success|gains?|gained|loses?|lost|increased|hit\s*points?|strength|defence|level|wow!|snegg|feels amazing|potion|was\s+(?:dying|starving|famished|hungry|fine)/i.test(t);
     });
   }
 
@@ -267,7 +266,7 @@
 
   function stripHungerText(s) {
     return String(s || '')
-      .replace(/\b(?:he|she|your pet|they)\s+(?:was|is|were|are)\s+(?:dying|starving|hungry|very hungry|somewhat hungry|not hungry|fine|happy|bloated)(?:\s+and\s+now\s+(?:he|she|they)\s+(?:is|are)\s+(?:dying|starving|hungry|very hungry|somewhat hungry|not hungry|fine|happy|bloated))?[!.,]*/gi, ' ')
+      .replace(/\b(?:he|she|your pet|they)\s+(?:was|is|were|are)\s+(?:dying|starving|famished|hungry|very hungry|somewhat hungry|not hungry|fine|happy|bloated)(?:\s+and\s+now\s+(?:he|she|they)\s+(?:is|are)\s+(?:dying|starving|famished|hungry|very hungry|somewhat hungry|not hungry|fine|happy|bloated))?[!.,]*/gi, ' ')
       .replace(/\b(?:dying|starving|hungry|very hungry|somewhat hungry|not hungry|bloated)\b/gi, ' ')
       .replace(/\b(?:lost|gained|loses?|gains?)\s+some\s+weight\b[^.!]*/gi, ' ')
       .replace(/\bhunger(?:\s+level)?\b[^.!]{0,50}/gi, ' ')
@@ -275,7 +274,17 @@
       .trim();
   }
 
+  function hungerTransition(raw) {
+    const m = String(raw || '').match(/was\s+(dying|starving|famished|very hungry|hungry|somewhat hungry|not hungry|fine|happy|bloated)[,\s]+and now (?:he|she|they|it)?\s*(?:is|are)\s+(dying|starving|famished|very hungry|hungry|somewhat hungry|not hungry|fine|happy|bloated)/i);
+    if (!m) return '';
+    return (m[1] + '->' + m[2]).toLowerCase();
+  }
+  function isFoodPage() {
+    const u = location.href.toLowerCase();
+    return /\/inventory\.phtml/.test(u) || /\/safetydeposit\.phtml/.test(u) || /\/home(?:\/|$|\?)/.test(u);
+  }
   function processInvUse() {
+    if (!isFoodPage()) return;
     if (onAuctionPage()) return;
     const boxes = collectUsePopups();
     if (!boxes.length) {
@@ -285,24 +294,28 @@
       return;
     }
     boxes.forEach((box) => {
-      if (box.closest && (box.closest('#petCare') || box.closest('#dcarePanel') || box.id === 'petCare')) return;
+      if (box.id === 'petCare' || box.id === 'dcarePanel') return;
       const raw = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
+      if (/hold on!?|leave the beta|less mobile-friendly|don'?t show me this again/i.test(raw)) return;
+      const hunger = hungerTransition(raw);
       const text = stripHungerText(raw);
       if (!text || text.length < 6) return;
-      if (isJunkLogLine(text) || isJunkLogLine(raw)) return;
       if (/you bought|you spent|has been added to your inventory/i.test(text) &&
           !/gains?|gained|increased|went up|loses?|lost/i.test(text)) return;
-      if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense/i.test(text)) return;
+      const hasGain = /gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense|level/i.test(text);
+      if (!hasGain) return;
 
       let line = stripHungerText(extractUseGainLine(box, text) || '');
       if (!line) {
-        line = text.replace(/Success!/ig, '').replace(/Close and Refresh/ig, '').trim().slice(0, 220);
+        line = text.replace(/Success!/ig, '').replace(/Close and Refresh/ig, '').replace(/Feed to [^ ]+/ig, '').trim().slice(0, 220);
       }
       line = stripHungerText(line);
       if (!line) return;
+      if (isJunkLogLine(line)) return;
       if (!/gains?|gained|increased|went up|loses?|lost|looks stronger|feel stronger|hit\s*points?|strength|defence|defense|level/i.test(line)) return;
 
-      const sig = line.toLowerCase() + '|' + String(window.__darthyFoodGen || 0);
+      // Hunger change is the eat signal. Same gain text can repeat on the next feed.
+      const sig = (line.toLowerCase() + '|' + hunger);
       const prev = box.getAttribute('data-darthy-foodsig') || '';
       if (prev === sig) return;
       box.setAttribute('data-darthy-foodsig', sig);
@@ -310,13 +323,12 @@
       if (processedThisSession.has(key)) return;
       processedThisSession.add(key);
 
-      addToLog(line);
-
       const src = line + ' ';
       const foodSource = 'food';
-      const pairRe = /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(hit\s*points?|health|endurance|strength|defence|defense|levels?|movement(?:\s+points?)?|agility|speed)/gi;
+      const pairRe = /(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(hit\s*points?|health|endurance|strength(?:\s+points?)?|defence(?:\s+points?)?|defense(?:\s+points?)?|levels?\(?s?\)?|movement(?:\s+points?)?|agility|speed)/gi;
       let pm;
       let found = false;
+      const bits = [];
       while ((pm = pairRe.exec(src)) !== null) {
         const amt = parseAmount(pm[1]);
         const stat = normalizeStat(pm[2]);
@@ -325,15 +337,19 @@
         const verbs = around.match(/\b(gains?|gained|increased|went up|loses?|lost|decreased|went down)\b/gi) || [];
         const lastVerb = verbs.length ? verbs[verbs.length - 1] : 'gains';
         const lose = /lose|lost|decreased|went down/i.test(lastVerb);
-        addStat(stat, lose ? -amt : amt, foodSource);
+        const delta = lose ? -amt : amt;
+        addStat(stat, delta, foodSource);
+        const label = stat === 'hp' ? 'HP' : stat.charAt(0).toUpperCase() + stat.slice(1);
+        bits.push((delta > 0 ? '+' : '') + delta + ' ' + label);
         found = true;
       }
       if (!found && /increased|went up|looks stronger|feel stronger/i.test(line) && !/\blost\b|\blose/i.test(line)) {
-        if (/strength|attack/i.test(line)) addStat('strength', 1, foodSource);
-        if (/defence|defense/i.test(line)) addStat('defence', 1, foodSource);
-        if (/hit\s*point|health|endurance/i.test(line)) addStat('hp', 1, foodSource);
-        if (/\blevel/i.test(line)) addStat('level', 1, foodSource);
+        if (/strength|attack/i.test(line)) { addStat('strength', 1, foodSource); bits.push('+1 Strength'); }
+        if (/defence|defense/i.test(line)) { addStat('defence', 1, foodSource); bits.push('+1 Defence'); }
+        if (/hit\s*point|health|endurance/i.test(line)) { addStat('hp', 1, foodSource); bits.push('+1 HP'); }
+        if (/\blevel/i.test(line)) { addStat('level', 1, foodSource); bits.push('+1 Level'); }
       }
+      if (bits.length) addToLog(PET_NAME + ' gains ' + bits.join(', '));
     });
   }
 
@@ -423,9 +439,9 @@
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
           addToLog('+2 Level, +5 HP, +5 Strength');
-          addStat('level', 2);
-          addStat('hp', 5);
-          addStat('strength', 5);
+          addStat('level', 2, 'fq');
+          addStat('hp', 5, 'fq');
+          addStat('strength', 5, 'fq');
         }
         return;
       }
@@ -437,9 +453,9 @@
           if (!processedThisSession.has(key)) {
             processedThisSession.add(key);
             addToLog('+3 HP, +3 Strength, +3 Defence');
-            addStat('hp', 3);
-            addStat('strength', 3);
-            addStat('defence', 3);
+            addStat('hp', 3, 'fq');
+            addStat('strength', 3, 'fq');
+            addStat('defence', 3, 'fq');
           }
         }
       }
@@ -450,7 +466,7 @@
         if (!processedThisSession.has(key) && /gains?|increased|levels?/i.test(lower)) {
           processedThisSession.add(key);
           addToLog('+2 Level');
-          addStat('level', 2);
+          addStat('level', 2, 'fq');
         }
       }
 
@@ -460,7 +476,7 @@
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
           addToLog('+3 Strength');
-          addStat('strength', 3);
+          addStat('strength', 3, 'fq');
         }
       }
 
@@ -470,7 +486,7 @@
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
           addToLog('+3 Defence');
-          addStat('defence', 3);
+          addStat('defence', 3, 'fq');
         }
       }
 
@@ -480,7 +496,7 @@
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
           addToLog('+3 HP');
-          addStat('hp', 3);
+          addStat('hp', 3, 'fq');
         }
       }
 
@@ -490,7 +506,7 @@
         if (!processedThisSession.has(key)) {
           processedThisSession.add(key);
           addToLog('+5 Level');
-          addStat('level', 5);
+          addStat('level', 5, 'fq');
         }
       }
     }
@@ -521,7 +537,7 @@
         }
 
         if (p.stat) {
-          addStat(p.stat, p.amount || 1);
+          addStat(p.stat, p.amount || 1, isFaerieQuestPage ? 'fq' : '');
         }
       }
     }
@@ -546,12 +562,12 @@
 
       const amount1 = parseAmount(match[1]);
       const stat1 = normalizeStat(match[2]);
-      if (stat1 && amount1) addStat(stat1, amount1);
+      if (stat1 && amount1) addStat(stat1, amount1, isFaerieQuestPage ? 'fq' : '');
 
       if (match[3] && match[4]) {
         const amount2 = parseAmount(match[3]);
         const stat2 = normalizeStat(match[4]);
-        if (stat2 && amount2) addStat(stat2, amount2);
+        if (stat2 && amount2) addStat(stat2, amount2, isFaerieQuestPage ? 'fq' : '');
       }
     }
 
@@ -886,8 +902,9 @@
                         url.includes('quests') || url.includes('home') || url.includes('quickref') ||
                         url.includes('petlookup') || url.includes('useobject') || url.includes('/pets') || url.includes('wheel');
 
+    const onFoodPages = isFoodPage();
     const observer = new MutationObserver(() => {
-      processInvUse();
+      if (onFoodPages) processInvUse();
       processWheelPrize();
       if (!interesting) return;
       processKitchen();
@@ -897,49 +914,48 @@
 
     observer.observe(document.body, { childList: true, subtree: true, characterData: true });
 
-    const onFoodPages = /inventory|safetydeposit|\/home|quickref|useobject|\/pets/i.test(url);
-    window.__darthyFoodGen = window.__darthyFoodGen || 0;
-    function bumpFoodGen() {
-      window.__darthyFoodGen += 1;
-      document.querySelectorAll('[data-darthy-foodsig]').forEach((el) => {
-        try { el.removeAttribute('data-darthy-foodsig'); } catch (_) {}
-      });
-    }
-    function burstFoodScan() {
-      bumpFoodGen();
-      let n = 0;
-      const iv = setInterval(() => {
-        processInvUse();
-        if (++n >= 40) clearInterval(iv);
-      }, 120);
-    }
-    document.addEventListener('click', (ev) => {
-      const t = ev.target && ev.target.closest && ev.target.closest('button, a, input, [onclick], li, .item, [class*="inv"], [class*="sdb"]');
-      if (!t) return;
-      const label = ((t.textContent || t.value || t.getAttribute('title') || t.getAttribute('aria-label') || '') + ' ' + (t.className || '')).toLowerCase();
-      if (/use|feed|give|eat|open|apply|potion|item|inv-|sdb-|hp-carousel|checkactivepet/i.test(label) || onFoodPages) {
+    if (onFoodPages) {
+      window.__darthyFoodGen = window.__darthyFoodGen || 0;
+      function bumpFoodGen() {
+        window.__darthyFoodGen += 1;
+        document.querySelectorAll('[data-darthy-foodsig]').forEach((el) => {
+          try { el.removeAttribute('data-darthy-foodsig'); } catch (_) {}
+        });
+      }
+      function burstFoodScan() {
+        bumpFoodGen();
+        let n = 0;
+        const iv = setInterval(() => {
+          processInvUse();
+          if (++n >= 40) clearInterval(iv);
+        }, 120);
+      }
+      document.addEventListener('click', (ev) => {
+        const t = ev.target && ev.target.closest && ev.target.closest('button, a, input, [onclick], li, .item, [class*="inv"], [class*="sdb"]');
+        if (!t) return;
+        const label = ((t.textContent || t.value || t.getAttribute('title') || t.getAttribute('aria-label') || '') + ' ' + (t.className || '')).toLowerCase();
         if (/use|feed|give|eat|apply|potion|item|inv-|sdb-|checkactivepet|hp-carousel-pet/i.test(label) || t.closest('.hp-carousel-pet, .inv-item, .sdb-item, #invResult')) {
           burstFoodScan();
         }
-      }
-    }, true);
+      }, true);
+      try {
+        const foodObs = new MutationObserver(() => processInvUse());
+        foodObs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+      } catch (_) {}
+      try {
+        const $ = window.jQuery;
+        if ($ && $.fn) $(document).ajaxComplete(() => setTimeout(processInvUse, 200));
+      } catch (_) {}
+      setInterval(() => processInvUse(), 150);
+    }
 
-    try {
-      const foodObs = new MutationObserver(() => processInvUse());
-      foodObs.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-    } catch (_) {}
-    try {
-      const $ = window.jQuery;
-      if ($ && $.fn) $(document).ajaxComplete(() => setTimeout(processInvUse, 200));
-    } catch (_) {}
     setInterval(() => {
-      processInvUse();
       processWheelPrize();
       if (!interesting) return;
       processKitchen();
       processLab();
       scanPageForGains();
-    }, onFoodPages ? 150 : 300);
+    }, 300);
 
     processInvUse();
     processWheelPrize();
