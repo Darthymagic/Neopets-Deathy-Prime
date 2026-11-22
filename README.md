@@ -7,7 +7,7 @@ A Chrome extension for Neopets (also works in Edge, Brave, and Opera).
 ### 1.6.1
 - Food Club: five betting styles you can pick (the choice is remembered):
   - Darthy No Bust: 0–5% bust chance
-  - Darthy Bets: 45–55% bust, the max TER style from Darthy Prime Plus
+  - Darthy Bets: 45–55% bust, the max TER style
   - Mimic - nsheng: 25–30% bust
   - Mimic - jkScrollingDown: 35–42% bust
   - Mimic - Garret Jaxx: about 30% bust when the round's odds look good (average E.R. per bet 1.85 or more), otherwise 0–5%
