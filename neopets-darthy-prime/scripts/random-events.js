@@ -1,0 +1,278 @@
+/**
+ * Random Events Tracker
+ * Detects "Something has happened!" / "Something is happening..." banners
+ * - NP gained → profit
+ * - NP lost/stolen → spending
+ * - Stat gains/losses → stats tracker log
+ * - Item awards → today's log
+ */
+(function () {
+  'use strict';
+
+  const SEEN_KEY = 'darthy_re_seen';
+  const processed = new Set();
+
+  function loadSeen() {
+    try {
+      const raw = sessionStorage.getItem(SEEN_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (_) { return new Set(); }
+  }
+  function saveSeen(set) {
+    try {
+      const arr = Array.from(set).slice(-80);
+      sessionStorage.setItem(SEEN_KEY, JSON.stringify(arr));
+    } catch (_) {}
+  }
+
+  function parseAmount(str) {
+    if (!str) return 0;
+    const map = { one:1, two:2, three:3, four:4, five:5, six:6, seven:7, eight:8, nine:9, ten:10 };
+    const s = String(str).toLowerCase().trim();
+    if (map[s]) return map[s];
+    return parseInt(s.replace(/,/g, ''), 10) || 0;
+  }
+
+  function normalizeStat(s) {
+    s = String(s || '').toLowerCase();
+    if (/level/.test(s)) return 'level';
+    if (/strength|attack/.test(s)) return 'strength';
+    if (/defence|defense/.test(s)) return 'defence';
+    if (/hit|health|endurance|hp/.test(s)) return 'hp';
+    return null;
+  }
+
+  function fingerprint(text) {
+    return text.replace(/\s+/g, ' ').trim().toLowerCase().slice(0, 180);
+  }
+
+  function handleEventText(text, boldItems) {
+    if (!text || text.length < 12) return;
+    const fp = fingerprint(text);
+    const seen = loadSeen();
+    if (seen.has(fp) || processed.has(fp)) return;
+    processed.add(fp);
+    seen.add(fp);
+    saveSeen(seen);
+
+    const lower = text.toLowerCase();
+
+    if (/start reading that straight away|get me more books|vanishes in a puff|read to pet/i.test(text)) return;
+    const isRE = /something has happened|something is happening/i.test(text);
+    if (!isRE) return;
+
+    let handled = false;
+
+    const av = text.match(/You are now eligible to use\s+['‘’"]?[^'‘’"\n]+['‘’"]?\s+as an avatar[!.]?/i);
+    if (av && window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+      window.DarthyPrimeStats.addToLog(av[0].replace(/\s+/g, ' ').trim());
+      handled = true;
+    }
+
+    // NC (not NP profit)
+    const ncM = text.match(/\b([\d,]+)\s*NC\b/i);
+    if (ncM && /gift|gives?|given|hands you|receive/i.test(text)) {
+      const amt = parseAmount(ncM[1]);
+      if (amt > 0 && window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+        window.DarthyPrimeStats.addToLog('You received ' + amt.toLocaleString() + ' NC');
+        handled = true;
+      }
+    }
+
+    // NP gained
+    const gainNP = text.match(/(?:find|found|receive[ds]?|gain[s]?|given|awarded|won|collect(?:ed)?|gift of)\s+(?:an?\s+)?([\d,]+)\s*NP\b/i) ||
+                   text.match(/([\d,]+)\s*NP\s+(?:has been|was|is)\s+(?:added|credited|deposited)/i) ||
+                   text.match(/(?:gives? you|hands you|pays? you)\s+([\d,]+)\s*NP\b/i);
+    if (gainNP) {
+      const amount = parseAmount(gainNP[1]);
+      if (amount > 0 && amount < 50000000) {
+        if (window.DarthyPrimeShop && window.DarthyPrimeShop.addProfit) {
+          window.DarthyPrimeShop.addProfit(amount);
+          window.DarthyPrimeShop.refreshUI && window.DarthyPrimeShop.refreshUI();
+        }
+        if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+          window.DarthyPrimeStats.addToLog('You received ' + amount.toLocaleString() + ' NP');
+        }
+        handled = true;
+      }
+    }
+
+    // NP lost / stolen
+    const loseNP = text.match(/(?:steal[s]?|stole|rob[s]?|takes?|took|loses?|lost|fines?|deducts?)\s+(?:an?\s+)?([\d,]+)\s*NP/i) ||
+                   text.match(/([\d,]+)\s*NP\s+(?:has been|was|is)\s+(?:stolen|taken|removed|deducted)/i);
+    if (loseNP) {
+      const amount = parseAmount(loseNP[1]);
+      if (amount > 0 && amount < 50000000) {
+        if (window.DarthyPrimeShop && window.DarthyPrimeShop.addSpend) {
+          window.DarthyPrimeShop.addSpend(amount);
+          window.DarthyPrimeShop.refreshUI && window.DarthyPrimeShop.refreshUI();
+        }
+        if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+          window.DarthyPrimeStats.addToLog(amount.toLocaleString() + ' NP was stolen');
+        }
+        handled = true;
+      }
+    }
+
+    // Stat changes
+    const statRe = /(?:your|the)?\s*(?:pet\s+)?([A-Za-z][A-Za-z0-9_]+)?\s*(?:gains?|loses?|gained|lost|has become better at|becomes better at)\s+(\d+|one|two|three|four|five|six)?\s*(strength|defence|defense|hit\s*points?|health|endurance|levels?|attack|agility)/gi;
+    let sm;
+    while ((sm = statRe.exec(text)) !== null) {
+      const action = /lose|lost/i.test(sm[0]) ? -1 : 1;
+      const amount = parseAmount(sm[2]);
+      const stat = normalizeStat(sm[3]);
+      if (stat && amount) {
+        if (window.DarthyPrimeStats && window.DarthyPrimeStats.addStat) {
+          window.DarthyPrimeStats.addStat(stat, action * amount, 're');
+        }
+        if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+          window.DarthyPrimeStats.addToLog((action > 0 ? '+' : '−') + amount + ' ' + stat);
+        }
+        handled = true;
+      }
+    }
+
+    // Item received — bold names in the RE copy (Jacko / Sloth / Mira / travelling library etc.)
+    const storyGive = /give you|gives? you|here to give|take this|hands you|hand it to you|a copy of|free copy of|price for this|figure this|offers you|looking for a new book/i.test(text);
+    let items = Array.isArray(boldItems) ? boldItems.filter(looksLikeItemName) : [];
+    if (!items.length) {
+      const itemM = text.match(/(?:take this|give you|gives? you|here to give you|hands you(?: a copy of)?|a copy of|free copy of|price for this|figure this|offers you(?: an?)?)\s+([A-Z][^!?.]{1,70}?)(?:[.!?"']|$| out\b)/i);
+      if (itemM) {
+        const name = String(itemM[1] || '').replace(/^an?\s+/i, '').replace(/\s+out$/i, '').trim();
+        if (looksLikeItemName(name)) items = [name];
+      }
+    }
+    items = items.filter(n => !/^(gift|a gift|the gift|item|an item)$/i.test(n));
+    if (!items.length) {
+      const gifted = text.match(/you(?:'ve| have)? been (?:given|gifted)\s+(?:an?\s+)?(?!gift\b)([A-Z][^!?.]{2,70}?)(?:[.!?"']|$)/i) ||
+        text.match(/(?:received|got|found)\s+(?:an?\s+)?([A-Z][^!?.]{2,70}?)(?:[.!?"']|$)/i);
+      if (gifted) {
+        const name = String(gifted[1] || '').replace(/^an?\s+/i, '').trim();
+        if (looksLikeItemName(name)) items = [name];
+      }
+    }
+    if (items.length) {
+      const phrase = /gifted|gives you a gift|been gifted/i.test(text)
+        ? "You've been gifted "
+        : /collected|collect/i.test(text)
+          ? "You've collected "
+          : "You received ";
+      items.forEach((name) => {
+        if (window.DarthyPrimeStats && window.DarthyPrimeStats.addToLog) {
+          window.DarthyPrimeStats.addToLog(phrase + name);
+        }
+      });
+      handled = true;
+    }
+
+    if (handled) {
+      console.log('%c[DarthyPrime RE] ' + text.slice(0, 120), 'color:#a78bfa');
+    }
+  }
+
+  function identityNames() {
+    const names = [];
+    try {
+      if (window.DarthyPrimeStats && window.DarthyPrimeStats.getPetName) names.push(window.DarthyPrimeStats.getPetName());
+      if (window.DarthyPrimeStats && window.DarthyPrimeStats.getUserName) names.push(window.DarthyPrimeStats.getUserName());
+    } catch (_) {}
+    try {
+      if (typeof GM_getValue === 'function') {
+        names.push(GM_getValue('darthy_pet_name', ''));
+        names.push(GM_getValue('darthy_username', ''));
+      }
+    } catch (_) {}
+    return names.map(n => String(n || '').trim().toLowerCase()).filter(Boolean);
+  }
+  function looksLikeItemName(name) {
+    const n = String(name || '').replace(/\s+/g, ' ').trim();
+    if (!n || n.length < 3 || n.length > 70) return false;
+    if (identityNames().indexOf(n.toLowerCase()) !== -1) return false;
+    if (/^\d+$/.test(n)) return false;
+    if (/^(np|nc|ok|close|enjoy|gift|a gift|the gift|item|an item)$/i.test(n)) return false;
+    if (/something has happened|something is happening|take this|fashion is for|unquestioning loyalty|neggery|darling/i.test(n)) return false;
+    if (/\b(np|nc)\b/i.test(n) && n.length < 12) return false;
+    if (/^[\d,]+$/.test(n)) return false;
+    if (/confirm purchase|wish to buy|keep shopping|cancel buy/i.test(n)) return false;
+    return true;
+  }
+
+  function boldItemsFrom(el) {
+    if (!el || !el.querySelectorAll) return [];
+    const names = [];
+    const seen = {};
+    el.querySelectorAll('b, strong').forEach((b) => {
+      const name = (b.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!name || name.length < 2 || name.length > 80) return;
+      if (/something has happened|something is happening|enjoy!?|np\b|close/i.test(name)) return;
+      const key = name.toLowerCase();
+      if (seen[key]) return;
+      seen[key] = true;
+      names.push(name);
+    });
+    return names;
+  }
+
+  function scan() {
+    const chunks = [];
+    const seenEl = new Set();
+
+    function pushEl(el) {
+      if (!el || seenEl.has(el)) return;
+      seenEl.add(el);
+      const copy = el.querySelector && el.querySelector('.copy');
+      const box = copy || el;
+      const t = (box.innerText || box.textContent || '').replace(/\s+/g, ' ').trim();
+      const head = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!/something has happened|something is happening/i.test(head) &&
+          !/something has happened|something is happening/i.test(t)) return;
+      if (/up for auction|start price \(np\)|minimum increment/i.test(t)) return;
+      if (/confirm purchase|are you sure you wish to buy|keep shopping/i.test(t)) return;
+      if (/hold on!?|leave the beta|less mobile-friendly|don'?t show me this again/i.test(t)) return;
+      if (el.closest && el.closest('#invResult, .invResult, #petCareResult, #sdb__popup, .sdb-popup')) return;
+      const snippet = t.slice(0, 360);
+      chunks.push({
+        text: /something has happened|something is happening/i.test(snippet)
+          ? snippet
+          : ('Something has happened! ' + snippet).slice(0, 360),
+        items: boldItemsFrom(box)
+      });
+    }
+
+    document.querySelectorAll('.randomEvent, #randomEvent, .something-happened, [class*="random-event"], [class*="RandomEvent"]').forEach(pushEl);
+
+    document.querySelectorAll('img[alt*="Something has happened"], img[alt*="Something is happening"], [class*="happened"]').forEach((el) => {
+      pushEl(el.closest('div, td, table, section, article') || el.parentElement);
+    });
+
+    document.querySelectorAll('div, td, section, article').forEach((el) => {
+      const own = Array.from(el.childNodes).some((n) => {
+        if (n.nodeType !== 1 && n.nodeType !== 3) return false;
+        const t = (n.textContent || '').replace(/\s+/g, ' ').trim();
+        return t.length > 8 && t.length < 60 && /something has happened|something is happening/i.test(t);
+      });
+      if (!own) return;
+      if ((el.innerText || '').length > 1200) return;
+      pushEl(el);
+    });
+
+    chunks.forEach((c) => handleEventText(c.text, c.items));
+  }
+
+  window.DarthyPrimeRE = {
+    init: function () {
+      // Events usually appear almost immediately — short watch window
+      scan();
+      let n = 0;
+      const iv = setInterval(() => {
+        n++;
+        scan();
+        if (n >= 20) clearInterval(iv);
+      }, 400);
+
+      const obs = new MutationObserver(() => scan());
+      obs.observe(document.documentElement, { childList: true, subtree: true });
+      setTimeout(() => obs.disconnect(), 20000);
+    }
+  };
+})();
