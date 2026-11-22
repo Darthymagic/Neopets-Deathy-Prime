@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Neopets Darthy Prime",
-  "version": "1.5.9",
+  "version": "1.6.1",
   "description": "Neopets Darthy Prime: Stats, pie chart, shop profit and top sellers, notifications, ShopWiz, stamps, random events.",
   "author": "Darthy",
   "permissions": [
@@ -36,6 +36,7 @@
         "scripts/shopwiz-pro.js",
         "scripts/questlog-premium.js",
         "scripts/account-completion.js",
+        "scripts/food-club.js",
         "scripts/content-main.js"
       ],
       "run_at": "document_idle",

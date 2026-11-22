@@ -13,6 +13,8 @@
   const SHOP_NAME_KEY = 'darthy_shop_name';
   const TRACK_TEXT_KEY = 'darthy_shop_track_text';
   const TRACK_COUNTS_KEY = 'darthy_shop_track_counts'; // { "negg": { name: "Negg", target: 4, sold: 2 }, ... }
+  const ITEM_SALES_KEY = 'darthy_item_sales'; // { "negg": { name: "Negg", qty: 4, np: 120000 } }
+  const WEEK_KEY = 'darthy_weekly_profit';
 
   function parsePrice(text) {
     if (!text) return 0;
@@ -36,6 +38,13 @@
   }
   function addProfit(amount) {
     if (!amount || amount <= 0) return getProfit();
+    if (typeof GM_addValue === 'function') {
+      GM_addValue(PROFIT_KEY, amount).then((t) => {
+        try { chrome.runtime.sendMessage({ type: 'shop-profit-updated', total: t }).catch(() => {}); } catch (_) {}
+        updateFinanceUI();
+      }).catch(() => { try { updateFinanceUI(); } catch (_) {} });
+      return getProfit() + amount;
+    }
     const t = getProfit() + amount;
     setProfit(t);
     return t;
@@ -48,8 +57,14 @@
   }
   function addSpend(amount) {
     if (!amount || amount <= 0) return getSpend();
-    // Soft caps from user: usershop ~1e6, TP ~2e7 per txn – ignore absurd values
     if (amount > 20000000) return getSpend();
+    if (typeof GM_addValue === 'function') {
+      GM_addValue(SPEND_KEY, amount).then((t) => {
+        try { chrome.runtime.sendMessage({ type: 'spending-updated', total: t }).catch(() => {}); } catch (_) {}
+        updateFinanceUI();
+      }).catch(() => {});
+      return getSpend() + amount;
+    }
     const t = getSpend() + amount;
     setSpend(t);
     return t;
@@ -107,16 +122,322 @@
       // If same item appears twice in list, keep the higher target
       const already = next[key];
       const target = already ? Math.max(already.target, parsed.target) : parsed.target;
-      const prevSold = prev[key] ? (prev[key].sold || 0) : 0;
+      const old = prev[key];
+      const oldTarget = old ? (old.target || 1) : 0;
+      const prevSold = old ? (old.sold || 0) : 0;
+      const soldOut = old && prevSold >= oldTarget;
+      let pending = old ? (old.pendingRestock || 0) : 0;
+      if (target > oldTarget) {
+        // Already in the shop: previous target, or 1 for a new line with a qty.
+        const stocked = soldOut ? 0 : (oldTarget > 0 ? oldTarget : 1);
+        const missing = Math.max(0, target - stocked);
+        pending = soldOut ? target : Math.max(pending, missing);
+      }
       next[key] = {
         name: already ? already.name : parsed.name,
         target,
-        sold: Math.min(prevSold, target)
+        sold: Math.min(prevSold, target),
+        pendingRestock: pending
       };
     });
     setTrackText(rawText);
     setTrackCounts(next);
     return next;
+  }
+
+
+  function getItemSales() {
+    return GM_getValue(ITEM_SALES_KEY, {}) || {};
+  }
+  function setItemSales(obj) {
+    GM_setValue(ITEM_SALES_KEY, obj || {});
+  }
+  function recordItemSales(sales) {
+    if (!sales || !sales.length) return;
+    const book = getItemSales();
+    const weeks = GM_getValue(WEEK_KEY, {}) || {};
+    const days = getDaily();   // 1.8.44: per-day totals from each sale's date
+    sales.forEach(sale => {
+      const key = normalizeItemName(sale.item);
+      if (!key) return;
+      const entry = book[key] || { name: sale.item, qty: 0, np: 0 };
+      entry.name = entry.name || sale.item;
+      entry.qty = (parseInt(entry.qty, 10) || 0) + 1;
+      entry.np = (parseInt(entry.np, 10) || 0) + (parseInt(sale.price, 10) || 0);
+      book[key] = entry;
+      const wk = weekKey(sale.date);
+      const w = weeks[wk] || { np: 0, qty: 0 };
+      w.np += parseInt(sale.price, 10) || 0;
+      w.qty += 1;
+      weeks[wk] = w;
+      const dk = parseSaleDate(sale.date).toISOString().slice(0, 10);
+      const dd = days[dk] || { np: 0, qty: 0 };
+      dd.np += parseInt(sale.price, 10) || 0;
+      dd.qty += 1;
+      days[dk] = dd;
+    });
+    setItemSales(book);
+    GM_setValue(WEEK_KEY, weeks);
+    GM_setValue(DAY_KEY, days);
+    renderTopSellers();
+  }
+  function brisbaneToday() {
+    const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Australia/Brisbane', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()).split('-');
+    return new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]));
+  }
+  function parseSaleDate(text) {
+    const m = String(text || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (!m) return brisbaneToday();
+    return new Date(Date.UTC(+m[3], +m[2] - 1, +m[1]));
+  }
+  function mondayOf(date) {
+    const d = new Date(date.getTime());
+    const day = d.getUTCDay();
+    const back = day === 0 ? 6 : day - 1;
+    d.setUTCDate(d.getUTCDate() - back);
+    return d;
+  }
+  function weekKey(text) {
+    const d = mondayOf(parseSaleDate(text));
+    return d.toISOString().slice(0, 10);
+  }
+  function weekLabel(key) {
+    const d = new Date(key + 'T00:00:00Z');
+    return d.getUTCDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getUTCMonth()];
+  }
+  function weekSeries() {
+    const stored = GM_getValue(WEEK_KEY, {}) || {};
+    const keys = Object.keys(stored).sort();
+    const start = mondayOf(keys.length ? new Date(keys[0] + 'T00:00:00Z') : brisbaneToday());
+    const end = mondayOf(brisbaneToday());
+    const out = [];
+    for (let d = new Date(start.getTime()); d <= end; d.setUTCDate(d.getUTCDate() + 7)) {
+      const key = d.toISOString().slice(0, 10);
+      out.push({ key: key, label: weekLabel(key), np: (stored[key] && stored[key].np) || 0, qty: (stored[key] && stored[key].qty) || 0 });
+    }
+    return out;
+  }
+  function formatCompact(n) {
+    n = Number(n) || 0;
+    const abs = Math.abs(n);
+    const cut = (v, d) => {
+      const s = v.toFixed(d).replace(/\.0$/, '');
+      return (n < 0 ? '-' : '') + s;
+    };
+    if (abs >= 1e12) return cut(abs / 1e12, abs >= 1e13 ? 0 : 1) + 'T';
+    if (abs >= 1e9) return cut(abs / 1e9, abs >= 1e10 ? 0 : 1) + 'B';
+    if (abs >= 1e6) return cut(abs / 1e6, abs >= 1e7 ? 0 : 1) + 'M';
+    if (abs >= 1e3) return cut(abs / 1e3, abs >= 1e4 ? 0 : 1) + 'K';
+    return String(Math.round(n));
+  }
+  function renderWeekChart() {
+    const weeks = weekSeries();
+    if (!weeks.length) return '<div style="color:#64748b;font-size:11px;padding:8px;">No weeks yet.</div>';
+    const max = Math.max(1, ...weeks.map(w => w.np));
+    const cols = weeks.map(w => {
+      const up = w.np > 0;
+      const h = up ? Math.max(18, Math.round((w.np / max) * 92)) : 14;
+      const color = up ? '#16a34a' : '#dc2626';
+      const tip = up ? (formatCompact(w.np) + ' NP · ' + w.qty + ' sold') : 'No sales';
+      return '<div title="' + tip + '" style="flex:0 0 42px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:128px;">' +
+        '<div style="font-size:8px;color:#94a3b8;margin-bottom:3px;white-space:nowrap;">' + (up ? formatCompact(w.np) : '0') + '</div>' +
+        '<div style="width:16px;height:' + h + 'px;background:' + color + ';border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.35);"></div>' +
+        '<div style="width:1px;height:8px;background:' + color + ';"></div>' +
+        '<div style="font-size:8px;color:#cbd5e1;margin-top:4px;white-space:nowrap;">' + w.label + '</div></div>';
+    }).join('');
+    return '<div style="font-size:10px;color:#94a3b8;margin:2px 0 6px;">Weekly profit · new candle each Monday · green = sales · red = none</div>' +
+      '<div style="overflow-x:auto;overflow-y:hidden;border:1px solid #1e293b;border-radius:8px;background:#020617;padding:8px 6px 4px;">' +
+      '<div style="display:flex;align-items:flex-end;gap:6px;min-width:max-content;">' + cols + '</div></div>';
+  }
+  // ---- 1.8.44: day-to-day breakdown + Month Deep Dive ----
+  // Each processed sale is also added to its own day (the sale's date from the Shop History table, the same
+  // date the weekly candles use) in darthy_daily_profit { 'YYYY-MM-DD': { np, qty } }, kept forever.
+  // Weeks are Monday–Sunday, exactly like the week-to-week chart. Sales recorded before 1.8.44 only exist
+  // as weekly totals, so those weeks show the week total with a note instead of day bars.
+  const DAY_KEY = 'darthy_daily_profit';
+  const DOW_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  function getDaily() { const v = GM_getValue(DAY_KEY, {}); return (v && typeof v === 'object') ? v : {}; }
+  function addDays(key, n) { const d = new Date(key + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+  function todayKey() { return brisbaneToday().toISOString().slice(0, 10); }
+  function weekDays(wk) {
+    const daily = getDaily(), today = todayKey();
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const key = addDays(wk, i);
+      const v = daily[key] || null;
+      days.push({ key, label: DOW_LABELS[i], date: +key.slice(8, 10), np: (v && v.np) || 0, qty: (v && v.qty) || 0, future: key > today });
+    }
+    return days;
+  }
+  // week total vs what the daily records cover (the gap = sales from before daily tracking)
+  function weekInfo(wk) {
+    const stored = GM_getValue(WEEK_KEY, {}) || {};
+    const w = stored[wk] || { np: 0, qty: 0 };
+    const days = weekDays(wk);
+    const dNp = days.reduce((s, d) => s + d.np, 0), dQty = days.reduce((s, d) => s + d.qty, 0);
+    return { key: wk, np: w.np || 0, qty: w.qty || 0, days, gapNp: Math.max(0, (w.np || 0) - dNp), gapQty: Math.max(0, (w.qty || 0) - dQty) };
+  }
+  function weekRangeLabel(wk) {
+    const e = addDays(wk, 6);
+    return (+wk.slice(8, 10)) + ' ' + MONTHS[+wk.slice(5, 7) - 1] + ' – ' + (+e.slice(8, 10)) + ' ' + MONTHS[+e.slice(5, 7) - 1];
+  }
+  // the same stock-like candles as the week-to-week chart, one per day
+  function renderDayBars(info) {
+    const max = Math.max(1, ...info.days.map(d => d.np));
+    const noDetail = info.gapNp > 0 && info.gapNp === info.np;   // only a weekly total exists for this week
+    const cols = info.days.map(d => {
+      const up = d.np > 0;
+      const blank = d.future || noDetail;
+      const color = blank ? '#334155' : (up ? '#16a34a' : '#dc2626');
+      const h = up ? Math.max(18, Math.round((d.np / max) * 92)) : (blank ? 6 : 14);
+      const tip = d.key + ' · ' + (d.future ? 'still to come' : noDetail ? 'no day detail' : (up ? formatCompact(d.np) + ' NP · ' + d.qty + ' sold' : 'No sales'));
+      return '<div title="' + tip + '" style="flex:1 0 42px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:128px;">' +
+        '<div style="font-size:8px;color:#94a3b8;margin-bottom:3px;white-space:nowrap;">' + (blank ? '' : (up ? formatCompact(d.np) : '0')) + '</div>' +
+        '<div style="width:16px;height:' + h + 'px;background:' + color + ';border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.35);"></div>' +
+        '<div style="width:1px;height:8px;background:' + color + ';"></div>' +
+        '<div style="font-size:9px;color:#e2e8f0;margin-top:4px;font-weight:bold;">' + d.label + '</div>' +
+        '<div style="font-size:8px;color:#64748b;white-space:nowrap;">' + d.date + '</div>' +
+        '<div style="font-size:8px;color:#7dd3fc;white-space:nowrap;">' + (d.future || !d.qty ? '' : d.qty + ' sold') + '</div></div>';
+    }).join('');
+    const gap = info.gapNp > 0
+      ? '<div style="font-size:9px;color:#64748b;margin-top:4px;">' + (info.gapNp === info.np ? 'No day detail for this week (sales recorded before daily tracking started in 1.8.44) — week total ' : 'Plus ') +
+        formatCompact(info.gapNp) + ' NP · ' + info.gapQty + ' sold' + (info.gapNp === info.np ? '.' : ' from before daily tracking (1.8.44), not split by day.') + '</div>'
+      : '';
+    return '<div style="overflow-x:auto;overflow-y:hidden;border:1px solid #1e293b;border-radius:8px;background:#020617;padding:8px 6px 4px;">' +
+      '<div style="display:flex;align-items:flex-end;gap:6px;min-width:max-content;">' + cols + '</div></div>' + gap;
+  }
+  function renderThisWeek() {
+    const info = weekInfo(mondayOf(brisbaneToday()).toISOString().slice(0, 10));
+    return '<div style="font-size:10px;color:#94a3b8;margin:2px 0 6px;">This week day by day · ' + weekRangeLabel(info.key) + ' · ' +
+      formatCompact(info.np) + ' NP · ' + info.qty + ' sold · green = sales · red = none</div>' + renderDayBars(info) +
+      '<div style="height:10px;"></div>';
+  }
+  // months with any sales (daily records, or weekly totals for older weeks), newest first; the current month always
+  function deepDiveMonths() {
+    const set = new Set([todayKey().slice(0, 7)]);
+    Object.keys(getDaily()).forEach(k => { const v = getDaily()[k]; if (v && (v.np || v.qty)) set.add(k.slice(0, 7)); });
+    const stored = GM_getValue(WEEK_KEY, {}) || {};
+    Object.keys(stored).forEach(k => { if (stored[k] && (stored[k].np || stored[k].qty)) { set.add(k.slice(0, 7)); set.add(addDays(k, 6).slice(0, 7)); } });
+    return [...set].sort().reverse();
+  }
+  // Monday–Sunday weeks that overlap the month
+  function monthWeeks(month) {
+    const first = month + '-01';
+    const out = [];
+    let wk = mondayOf(new Date(first + 'T00:00:00Z')).toISOString().slice(0, 10);
+    while (wk.slice(0, 7) <= month && wk <= todayKey()) {
+      if (addDays(wk, 6) >= first) out.push(wk);
+      wk = addDays(wk, 7);
+    }
+    return out;
+  }
+  let ddMonth = '';
+  const ddOpenWeeks = new Set();
+  let ddOpen = false;
+  function renderDeepDive() {
+    const months = deepDiveMonths();
+    if (!ddMonth || !months.includes(ddMonth)) ddMonth = months[0];
+    const weeks = monthWeeks(ddMonth).map(weekInfo);
+    const daily = getDaily();
+    let mNp = 0, mQty = 0;
+    Object.keys(daily).forEach(k => { if (k.slice(0, 7) === ddMonth) { mNp += daily[k].np || 0; mQty += daily[k].qty || 0; } });
+    let approx = false;
+    weeks.forEach(w => { if (w.gapNp > 0 && w.key.slice(0, 7) === ddMonth) { mNp += w.gapNp; mQty += w.gapQty; approx = true; } });
+    const opts = months.map(m => '<option value="' + m + '"' + (m === ddMonth ? ' selected' : '') + '>' + MONTHS_LONG[+m.slice(5, 7) - 1] + ' ' + m.slice(0, 4) + '</option>').join('');
+    const max = Math.max(1, ...weeks.map(w => w.np));
+    const cols = weeks.map(w => {
+      const up = w.np > 0;
+      const h = up ? Math.max(18, Math.round((w.np / max) * 92)) : 14;
+      const color = up ? '#16a34a' : '#dc2626';
+      return '<div title="' + (up ? formatCompact(w.np) + ' NP · ' + w.qty + ' sold' : 'No sales') + '" style="flex:1 0 56px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:128px;">' +
+        '<div style="font-size:8px;color:#94a3b8;margin-bottom:3px;white-space:nowrap;">' + (up ? formatCompact(w.np) : '0') + '</div>' +
+        '<div style="width:16px;height:' + h + 'px;background:' + color + ';border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.35);"></div>' +
+        '<div style="width:1px;height:8px;background:' + color + ';"></div>' +
+        '<div style="font-size:8px;color:#cbd5e1;margin-top:4px;white-space:nowrap;">' + weekLabel(w.key) + '</div></div>';
+    }).join('');
+    const weekRows = weeks.slice().reverse().map(w =>
+      '<details class="darthy-ts-week" data-week="' + w.key + '"' + (ddOpenWeeks.has(w.key) ? ' open' : '') + ' style="margin:6px 0;border:1px solid #1e293b;border-radius:8px;background:#0b1220;">' +
+      '<summary style="padding:6px 8px;cursor:pointer;font-size:11px;color:#e2e8f0;">' +
+      '<b>' + weekRangeLabel(w.key) + '</b> <span style="color:#4ade80;">' + formatCompact(w.np) + ' NP</span> <span style="color:#7dd3fc;">· ' + w.qty + ' sold</span>' +
+      (w.gapNp > 0 && w.gapNp === w.np ? ' <span style="color:#64748b;font-size:9px;">· weekly total only</span>' : '') + '</summary>' +
+      '<div style="padding:0 8px 8px;">' + renderDayBars(w) + '</div></details>'
+    ).join('');
+    return '<details id="darthy-ts-deepdive"' + (ddOpen ? ' open' : '') + ' style="margin:10px 0 4px;border:1px solid #334155;border-radius:8px;background:#020617;">' +
+      '<summary style="padding:7px 10px;cursor:pointer;font-weight:bold;color:#fbbf24;font-size:12px;">Month Deep Dive</summary>' +
+      '<div style="padding:4px 10px 10px;">' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">' +
+      '<select id="darthy-ts-month" style="font:11px Verdana;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:4px;padding:2px 4px;">' + opts + '</select>' +
+      '<span style="font-size:11px;color:#94a3b8;">' + (approx ? '≈ ' : '') + '<span style="color:#4ade80;">' + formatCompact(mNp) + ' NP</span> · ' + mQty + ' sold this month</span></div>' +
+      '<div style="font-size:10px;color:#94a3b8;margin:2px 0 6px;">Weeks in ' + MONTHS_LONG[+ddMonth.slice(5, 7) - 1] + ' (Mon–Sun, full-week totals) · open a week for its day-by-day bars</div>' +
+      (weeks.length ? '<div style="overflow-x:auto;overflow-y:hidden;border:1px solid #1e293b;border-radius:8px;background:#020617;padding:8px 6px 4px;">' +
+        '<div style="display:flex;align-items:flex-end;gap:6px;min-width:max-content;">' + cols + '</div></div>' + weekRows
+        : '<div style="color:#64748b;font-size:11px;padding:8px;">No weeks yet.</div>') +
+      (approx ? '<div style="font-size:9px;color:#64748b;margin-top:4px;">≈ includes weekly totals from before daily tracking (1.8.44) for weeks starting this month.</div>' : '') +
+      '</div></details>';
+  }
+  function bindDeepDive(body) {
+    if (!body || body.dataset.darthyDeepDive) return;
+    body.dataset.darthyDeepDive = '1';
+    body.addEventListener('change', e => {
+      if (e.target && e.target.id === 'darthy-ts-month') { ddMonth = e.target.value; ddOpenWeeks.clear(); renderTopSellers(); }
+    });
+    body.addEventListener('toggle', e => {
+      const t = e.target;
+      if (!t || !t.tagName || t.tagName.toLowerCase() !== 'details') return;
+      if (t.id === 'darthy-ts-deepdive') ddOpen = t.open;
+      else if (t.dataset && t.dataset.week) { if (t.open) ddOpenWeeks.add(t.dataset.week); else ddOpenWeeks.delete(t.dataset.week); }
+    }, true);
+  }
+  function topSellers(limit) {
+    return Object.values(getItemSales())
+      .filter(e => e && e.name)
+      .sort((a, b) => (b.np || 0) - (a.np || 0) || (b.qty || 0) - (a.qty || 0))
+      .slice(0, limit || 25);
+  }
+  function renderTopSellers() {
+    const body = document.getElementById('darthy-top-sellers-body');
+    if (!body) return;
+    const rows = topSellers(25);
+    const all = Object.keys(getItemSales()).length;
+    // 1.8.44: this week's day-to-day candles on top, the week-to-week chart under it, then the Month Deep Dive
+    const chart = renderThisWeek() + renderWeekChart() + renderDeepDive();
+    bindDeepDive(body);
+    if (!rows.length) {
+      body.innerHTML = chart + '<div style="color:#64748b;font-size:11px;padding:8px;">No sales recorded yet. Process Shop History to add them.</div>';
+      return;
+    }
+    const head = '<div style="display:grid;grid-template-columns:28px 1fr 70px 110px;gap:6px;font-size:10px;color:#94a3b8;padding:4px 2px;border-bottom:1px solid #334155;"><span>#</span><span>Item</span><span style="text-align:right;">Qty</span><span style="text-align:right;">Total NP</span></div>';
+    const lines = rows.map((e, i) =>
+      '<div style="display:grid;grid-template-columns:28px 1fr 70px 110px;gap:6px;font-size:11px;padding:5px 2px;border-bottom:1px solid #1e293b;">' +
+      '<span style="color:#64748b;">' + (i + 1) + '</span>' +
+      '<span style="word-break:break-word;">' + escapeHtml(e.name) + '</span>' +
+      '<span style="text-align:right;color:#7dd3fc;">' + (e.qty || 0).toLocaleString() + '</span>' +
+      '<span style="text-align:right;color:#4ade80;">' + (e.np || 0).toLocaleString() + '</span></div>'
+    ).join('');
+    body.innerHTML = chart + '<div style="font-size:10px;color:#94a3b8;margin:8px 0 6px;">Top 25 by NP made. Tracking ' + all + ' item' + (all === 1 ? '' : 's') + '.</div>' + head + lines;
+  }
+  function mountTopSellers() {
+    if (document.getElementById('darthy-top-sellers')) {
+      renderTopSellers();
+      return;
+    }
+    const nav = document.querySelector('nav.mkt-subnav');
+    if (!nav || !nav.parentNode) return;
+    const box = document.createElement('div');
+    box.id = 'darthy-top-sellers';
+    box.style.cssText = 'margin:10px auto 6px;max-width:720px;background:#0f172a;color:#e2e8f0;border:2px solid #fbbf24;border-radius:10px;font-family:Verdana,Arial,sans-serif;box-sizing:border-box;';
+    box.innerHTML = '<button type="button" id="darthy-top-sellers-toggle" style="width:100%;text-align:left;background:transparent;color:#fbbf24;border:none;padding:10px 12px;font-weight:bold;cursor:pointer;font-size:13px;">Top sellers ▸</button><div id="darthy-top-sellers-body" style="display:none;max-height:520px;overflow:auto;padding:0 12px 10px;"></div>';
+    nav.parentNode.insertBefore(box, nav.nextSibling);
+    const toggle = box.querySelector('#darthy-top-sellers-toggle');
+    const body = box.querySelector('#darthy-top-sellers-body');
+    toggle.onclick = () => {
+      const open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      toggle.textContent = open ? 'Top sellers ▸' : 'Top sellers ▾';
+    };
+    renderTopSellers();
   }
 
   function applySalesToTrackList(sales) {
@@ -146,7 +467,7 @@
 
   function getSoldOutItems() {
     const counts = getTrackCounts();
-    return Object.values(counts).filter(e => (e.sold || 0) >= (e.target || 1));
+    return Object.values(counts).filter(e => (e.sold || 0) >= (e.target || 1) || (e.pendingRestock || 0) > 0);
   }
 
   function getInProgressItems() {
@@ -159,8 +480,11 @@
     let n = 0;
     Object.keys(counts).forEach(key => {
       const e = counts[key];
-      if ((e.sold || 0) >= (e.target || 1)) {
-        e.sold = 0;
+      const soldOut = (e.sold || 0) >= (e.target || 1);
+      const extra = (e.pendingRestock || 0) > 0;
+      if (soldOut || extra) {
+        if (soldOut) e.sold = 0;
+        e.pendingRestock = 0;
         n++;
       }
     });
@@ -180,28 +504,46 @@
     const section = document.getElementById('neopets-stats-section');
     if (!section) return;
 
-    // Prefer inserting after #stat-days
-    const daysEl = document.getElementById('stat-days');
-    if (!daysEl) return;
+    const anchor = document.getElementById('shop-profit-anchor') || document.getElementById('stat-days');
+    if (!anchor) return;
 
     let row = document.getElementById('shop-profit-row');
     if (!row) {
       row = document.createElement('div');
       row.id = 'shop-profit-row';
       row.style.cssText = 'margin-top:8px;padding-top:6px;border-top:1px solid #4a4a6a;';
-      daysEl.parentNode.insertBefore(row, daysEl.nextSibling);
+      if (anchor.id === 'shop-profit-anchor') anchor.appendChild(row);
+      else anchor.parentNode.insertBefore(row, anchor.nextSibling);
     }
 
     const shopName = getShopName();
-    const nameLine = shopName
-      ? `<div style="font-weight:bold;color:#fbbf24;margin-bottom:4px;font-size:12px;">${escapeHtml(shopName)}</div>`
-      : `<div style="font-weight:bold;color:#fbbf24;margin-bottom:3px;font-size:12px;">Shop Profit</div>`;
-
+    const title = shopName || 'Shop Profit';
     row.innerHTML = `
-      ${nameLine}
-      <div style="font-size:12px;">Profit: <span id="shop-profit-value" style="color:#4ade80;font-weight:bold;">${formatNP(getProfit())}</span></div>
-      <div style="font-size:12px;margin-top:3px;">Spending: <span id="shop-spend-value" style="color:#f87171;font-weight:bold;">${formatNP(getSpend())}</span></div>
+      <div id="darthy-drop-fin-h" style="font-weight:bold;color:#fbbf24;margin-bottom:4px;font-size:12px;cursor:pointer;user-select:none;">${escapeHtml(title)} <span class="darthy-caret">▾</span></div>
+      <div id="darthy-drop-fin-b">
+        <div style="font-size:12px;">Profit: <span id="shop-profit-value" style="color:#4ade80;font-weight:bold;">${formatNP(getProfit())}</span></div>
+        <div style="font-size:12px;margin-top:3px;">Spending: <span id="shop-spend-value" style="color:#f87171;font-weight:bold;">${formatNP(getSpend())}</span></div>
+      </div>
     `;
+    const h = row.querySelector('#darthy-drop-fin-h');
+    const b = row.querySelector('#darthy-drop-fin-b');
+    const apply = (open) => {
+      if (b) b.style.display = open ? 'block' : 'none';
+      const c = h && h.querySelector('.darthy-caret');
+      if (c) c.textContent = open ? '▾' : '▸';
+    };
+    let open = true;
+    try { if (localStorage.getItem('dp_drop_fin') === '0') open = false; } catch (_) {}
+    apply(open);
+    if (h && !h.dataset.bound) {
+      h.dataset.bound = '1';
+      h.addEventListener('click', e => {
+        e.preventDefault();
+        const next = b.style.display === 'none';
+        apply(next);
+        try { localStorage.setItem('dp_drop_fin', next ? '1' : '0'); } catch (_) {}
+      });
+    }
   }
 
   function escapeHtml(s) {
@@ -331,11 +673,12 @@
       if (soldOut.length === 0) {
         soldOutEl.innerHTML = '<div style="color:#64748b;font-size:11px;">None — nothing needs restocking.</div>';
       } else {
-        soldOutEl.innerHTML = soldOut.map(e =>
-          `<div style="padding:4px 0;border-bottom:1px solid #7f1d1d;font-size:11px;color:#fca5a5;">
-            ${escapeHtml(e.name)} <span style="color:#f87171;">×${e.target || 1}</span>
-          </div>`
-        ).join('');
+        soldOutEl.innerHTML = soldOut.map(e => {
+          const qty = e.pendingRestock || e.target || 1;
+          return `<div style="padding:4px 0;border-bottom:1px solid #7f1d1d;font-size:11px;color:#fca5a5;">
+            ${escapeHtml(e.name)} <span style="color:#f87171;">×${qty}</span>
+          </div>`;
+        }).join('');
       }
     }
   }
@@ -385,9 +728,9 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.25);
     `;
     left.innerHTML = `
-      <div style="font-size:12px;color:#38bdf8;font-weight:bold;margin-bottom:6px;">📦 Track Items</div>
+      <div style="font-size:12px;color:#38bdf8;font-weight:bold;margin-bottom:6px;">📦 Shop Stock</div>
       <div style="font-size:10px;color:#94a3b8;margin-bottom:6px;line-height:1.35;">
-        One per line. <b>Negg x 4</b> = track 4 sales. Plain name = 1.
+        One per line. <b>Negg x 4</b> = keep 4. Raising a qty adds the extra to Needs Restock.
       </div>
       <textarea id="darthy-track-textarea" spellcheck="false" placeholder="Negg x 4&#10;Mauket&#10;Woodland Mortog x 2"
         style="width:100%;height:180px;resize:vertical;overflow:auto;box-sizing:border-box;
@@ -420,9 +763,20 @@
       <div style="font-size:10px;color:#94a3b8;margin-bottom:8px;line-height:1.35;">
         Items that hit their track target. Restock in your shop, then click Stocked.
       </div>
-      <div id="darthy-track-soldout" style="background:#1c0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:6px 8px;max-height:320px;overflow-y:auto;min-height:80px;"></div>
+      <div id="darthy-track-soldout" style="background:#1c0a0a;border:1px solid #7f1d1d;border-radius:6px;padding:6px 8px;max-height:220px;overflow-y:auto;min-height:80px;"></div>
       <button id="darthy-track-stocked" style="margin-top:10px;width:100%;background:#16a34a;color:white;border:none;padding:8px;border-radius:6px;font-size:12px;font-weight:bold;cursor:pointer;">Stocked</button>
-      <div style="font-size:10px;color:#64748b;margin-top:6px;text-align:center;">Resets sold counters so tracking starts again.</div>
+      <div style="font-size:10px;color:#64748b;margin-top:6px;text-align:center;">Resets sold counters, then pulls those items from SDB into your shop.</div>
+      <button id="darthy-nostock-toggle" style="margin-top:10px;width:100%;background:#334155;color:#e2e8f0;border:none;padding:6px;border-radius:6px;font-size:11px;cursor:pointer;">No Stock in SDB ▸</button>
+      <div id="darthy-nostock-wrap" style="display:none;margin-top:6px;">
+        <div style="font-size:10px;color:#94a3b8;margin-bottom:4px;line-height:1.35;">Items not found in SDB (with qty). Backspace a line and Save to remove. Retry pulls this list from SDB again.</div>
+        <textarea id="darthy-nostock-textarea" spellcheck="false"
+          style="width:100%;height:90px;resize:vertical;overflow:auto;box-sizing:border-box;background:#0f172a;color:#fca5a5;border:1px solid #7f1d1d;border-radius:6px;padding:6px;font-size:11px;font-family:Verdana,monospace;line-height:1.35;"></textarea>
+        <div style="display:flex;gap:6px;margin-top:6px;">
+          <button id="darthy-nostock-save" style="flex:1;background:#b45309;color:white;border:none;padding:6px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">Save No Stock list</button>
+          <button id="darthy-nostock-retry" style="flex:1;background:#2563eb;color:white;border:none;padding:6px;border-radius:6px;font-size:11px;font-weight:bold;cursor:pointer;">Retry</button>
+        </div>
+        <div id="darthy-nostock-status" style="font-size:10px;color:#4ade80;min-height:14px;margin-top:3px;text-align:center;"></div>
+      </div>
     `;
 
     layout.appendChild(left);
@@ -449,15 +803,77 @@
         alert('Nothing is sold out right now.');
         return;
       }
-      if (!confirm(`Mark ${soldOut.length} sold-out item(s) as restocked and start tracking again?`)) return;
+      if (!confirm(`Mark ${soldOut.length} sold-out item(s) as restocked, then pull them from SDB into your shop?`)) return;
+      const textQty = {};
+      String(getTrackText() || '').split(/\r?\n/).forEach(line => {
+        const p = parseTrackLine(line);
+        if (!p) return;
+        textQty[normalizeItemName(p.name)] = p.target;
+      });
+      const snapshot = soldOut.map(e => {
+        const key = normalizeItemName(e.name);
+        const qty = e.pendingRestock || (textQty[key] != null ? textQty[key] : 1);
+        return { name: e.name, target: qty, qty: qty };
+      });
       const n = restockSoldOut();
       renderTrackPanels();
       const st = document.getElementById('darthy-track-save-status');
       if (st) {
-        st.textContent = `Restocked ${n} item(s) ✓`;
-        setTimeout(() => { st.textContent = ''; }, 2000);
+        st.textContent = `Restocked ${n} item(s) ✓ — opening SDB…`;
+        setTimeout(() => { st.textContent = ''; }, 2500);
+      }
+      if (window.DarthyPrimeRestock && typeof window.DarthyPrimeRestock.start === 'function') {
+        window.DarthyPrimeRestock.start(snapshot);
+      } else {
+        alert('Restock helper not loaded. Reloaded the extension and try again.');
       }
     };
+
+    const nsToggle = right.querySelector('#darthy-nostock-toggle');
+    const nsWrap = right.querySelector('#darthy-nostock-wrap');
+    const nsTa = right.querySelector('#darthy-nostock-textarea');
+    if (nsTa && window.DarthyPrimeRestock) {
+      nsTa.value = (window.DarthyPrimeRestock.getNoStock() || []).join('\n');
+    }
+    if (nsToggle && nsWrap) {
+      nsToggle.onclick = () => {
+        const open = nsWrap.style.display !== 'none';
+        nsWrap.style.display = open ? 'none' : 'block';
+        nsToggle.textContent = open ? 'No Stock in SDB ▸' : 'No Stock in SDB ▾';
+      };
+    }
+    const nsSave = right.querySelector('#darthy-nostock-save');
+    if (nsSave) {
+      nsSave.onclick = () => {
+        const raw = (document.getElementById('darthy-nostock-textarea') || {}).value || '';
+        const names = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        if (window.DarthyPrimeRestock) window.DarthyPrimeRestock.setNoStock(names);
+        const st = document.getElementById('darthy-nostock-status');
+        if (st) {
+          st.textContent = 'Saved ✓';
+          setTimeout(() => { st.textContent = ''; }, 1600);
+        }
+      };
+    }
+    const nsRetry = right.querySelector('#darthy-nostock-retry');
+    if (nsRetry) {
+      nsRetry.onclick = () => {
+        const ta = document.getElementById('darthy-nostock-textarea');
+        if (ta && window.DarthyPrimeRestock) {
+          const names = String(ta.value || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+          window.DarthyPrimeRestock.setNoStock(names);
+        }
+        const list = window.DarthyPrimeRestock ? window.DarthyPrimeRestock.getNoStock() : [];
+        if (!list || !list.length) {
+          alert('No Stock list is empty.');
+          return;
+        }
+        if (!confirm('Retry SDB restock for ' + list.length + ' item(s) on the No Stock list?')) return;
+        if (window.DarthyPrimeRestock && typeof window.DarthyPrimeRestock.startFromNoStock === 'function') {
+          window.DarthyPrimeRestock.startFromNoStock();
+        }
+      };
+    }
 
     if (getTrackText() && !Object.keys(getTrackCounts()).length) {
       saveTrackListFromText(getTrackText());
@@ -543,6 +959,7 @@
     if (ta) saveTrackListFromText(ta.value);
 
     const trackResult = applySalesToTrackList(sales);
+    recordItemSales(sales);
     const newTotal = addProfit(total);
     const summary = sales.length === 1
       ? `Added ${formatNP(total)} from 1 sale.`
@@ -648,7 +1065,7 @@
       injectProfitDisplay(notice || document.getElementById('darthy-sales-center'));
     }
 
-    console.log('%c[DarthyPrime Shop] Panels on ' + (table ? 'sales table' : '1000 NP notice'), 'color:#fbbf24;font-weight:bold');
+    mountTopSellers();
   }
 
   /** Fallback if the static notice isn't found */
@@ -808,6 +1225,68 @@
     setTimeout(() => banner.remove(), 2800);
   }
 
+
+  const BANK_KEY = 'darthy_bank_interest_day';
+  function nstDate() {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    } catch (_) { return new Date().toISOString().slice(0, 10); }
+  }
+  function bankInterestAmount() {
+    const btn = document.querySelector('#frmCollectInterest input[type="submit"], input.bank-interest-btn, input[value*="Collect Interest"]');
+    const chunks = [];
+    if (btn) {
+      chunks.push(btn.value || '');
+      const form = btn.closest('form') || btn.parentElement;
+      if (form) chunks.push(form.innerText || form.textContent || '');
+    }
+    chunks.push(document.body.innerText || '');
+    const blob = chunks.join('\n');
+    const patterns = [
+      /collect(?:ed)?\s+interest[^\d]{0,40}([\d,]+)\s*NP/i,
+      /interest[^\d]{0,40}([\d,]+)\s*NP/i,
+      /collected\s+([\d,]+)\s*NP\s+in\s+interest/i,
+      /([\d,]+)\s*NP\s+in\s+interest/i,
+      /Collect Interest\s*\(?\s*([\d,]+)\s*NP/i
+    ];
+    for (const re of patterns) {
+      const m = blob.match(re);
+      if (m) {
+        const n = parseInt(String(m[1]).replace(/,/g, ''), 10);
+        if (n > 0 && n < 50000000) return n;
+      }
+    }
+    return 0;
+  }
+  function addBankInterest(amount, why) {
+    if (!amount || amount <= 0) return false;
+    const day = nstDate();
+    const done = GM_getValue(BANK_KEY, '');
+    if (done === day) return false;
+    GM_setValue(BANK_KEY, day);
+    addProfit(amount);
+    console.log('%c[DarthyPrime] Bank interest +' + amount.toLocaleString() + ' NP', 'color:#4ade80;font-weight:bold');
+    return true;
+  }
+  function startBankInterestWatcher() {
+    if (!/bank\.phtml/i.test(location.href)) return;
+    const btn = document.querySelector('#frmCollectInterest input[type="submit"], input.bank-interest-btn');
+    if (btn && !btn.getAttribute('data-darthy-bank')) {
+      btn.setAttribute('data-darthy-bank', '1');
+      btn.addEventListener('click', () => {
+        const amount = bankInterestAmount();
+        setTimeout(() => addBankInterest(amount || bankInterestAmount(), 'click'), 1800);
+      }, true);
+    }
+    const obs = new MutationObserver(() => {
+      const t = document.body.innerText || '';
+      if (/collected[^\n]{0,40}[\d,]+\s*NP[^\n]{0,40}interest|interest[^\n]{0,40}collected/i.test(t)) {
+        addBankInterest(bankInterestAmount(), 'result');
+      }
+    });
+    obs.observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+
   function startSpendWatchers() {
     // Initial pass
     tryParseUsershopSpend();
@@ -840,6 +1319,15 @@
         }
       };
       tryDropdown();
+      window.addEventListener('darthy-storage-changed', (ev) => {
+        const ch = ev && ev.detail;
+        if (!ch) return;
+        if (ch[PROFIT_KEY] || ch[SPEND_KEY] || ch[SHOP_NAME_KEY]) updateFinanceUI();
+      });
+      setInterval(() => {
+        if (typeof DarthyPrimeStorage === 'undefined' || !DarthyPrimeStorage.reload) return;
+        DarthyPrimeStorage.reload().then(updateFinanceUI).catch(() => {});
+      }, 4000);
 
       if (isSalesHistoryPage()) {
         setTimeout(enhanceSalesPage, 600);
@@ -854,6 +1342,7 @@
 
       // Spending on usershops + trading post (and any page that shows those success messages)
       startSpendWatchers();
+      startBankInterestWatcher();
     },
     getTotal: getProfit,
     getProfit: getProfit,

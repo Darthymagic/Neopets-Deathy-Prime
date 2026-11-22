@@ -24,6 +24,60 @@
     return true;
   }
 
+
+  const COMPLETION_DONE_KEY = 'darthy_completion_pets_done';
+
+  function needsCompletionPets() {
+    if (GM_getValue(COMPLETION_DONE_KEY, false)) return false;
+    const reader = String(GM_getValue('darthy_read_pet', '') || '').trim();
+    const eater = String(GM_getValue('darthy_gourmet_pet', '') || '').trim();
+    return !reader || !eater;
+  }
+
+  function showCompletionPets() {
+    if (document.getElementById('darthy-completion-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'darthy-completion-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:2147483646;display:flex;align-items:center;justify-content:center;font-family:Verdana,Arial,sans-serif;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#1e293b;border:2px solid #4a90e2;border-radius:14px;padding:24px 28px;width:min(420px,92vw);box-shadow:0 20px 50px rgba(0,0,0,0.5);color:#e2e8f0;';
+    box.innerHTML = `
+      <div style="text-align:center;margin-bottom:16px;">
+        <div style="font-size:16px;font-weight:bold;color:#7dd3fc;">Account Completion setup</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:4px;">New setting. Needed to track books and Gourmet Club.</div>
+      </div>
+      <label style="display:block;font-size:12px;color:#cbd5e1;margin-bottom:5px;">Book Reading Pet</label>
+      <input id="darthy-completion-read" type="text" placeholder="Pet used for books read" maxlength="20"
+        style="width:100%;padding:10px 12px;border-radius:7px;border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:14px;margin-bottom:12px;box-sizing:border-box;">
+      <label style="display:block;font-size:12px;color:#cbd5e1;margin-bottom:5px;">Gourmet Food Pet</label>
+      <input id="darthy-completion-food" type="text" placeholder="Pet used for Gourmet Club" maxlength="20"
+        style="width:100%;padding:10px 12px;border-radius:7px;border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:14px;margin-bottom:16px;box-sizing:border-box;">
+      <div id="darthy-completion-error" style="display:none;color:#f87171;font-size:12px;margin-bottom:10px;"></div>
+      <button id="darthy-completion-save" style="width:100%;padding:11px;background:linear-gradient(135deg,#4a90e2,#2563eb);color:white;border:none;border-radius:8px;font-size:14px;font-weight:bold;cursor:pointer;">Save pets</button>
+    `;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+    const read = document.getElementById('darthy-completion-read');
+    const food = document.getElementById('darthy-completion-food');
+    read.value = GM_getValue('darthy_read_pet', '') || '';
+    food.value = GM_getValue('darthy_gourmet_pet', '') || '';
+    document.getElementById('darthy-completion-save').onclick = () => {
+      const reader = read.value.trim();
+      const eater = food.value.trim();
+      const err = document.getElementById('darthy-completion-error');
+      if (!reader || !eater) {
+        err.style.display = 'block';
+        err.textContent = 'Enter both the Book Reading Pet and the Gourmet Food Pet.';
+        return;
+      }
+      GM_setValue('darthy_read_pet', reader);
+      GM_setValue('darthy_gourmet_pet', eater);
+      GM_setValue(COMPLETION_DONE_KEY, true);
+      overlay.remove();
+      location.reload();
+    };
+  }
+
   function showModal() {
     if (document.getElementById('darthy-setup-overlay')) return;
 
@@ -60,9 +114,15 @@
       <input id="darthy-setup-shop" type="text" placeholder="e.g. ✨ Darthy's Emporium" maxlength="40"
         style="width:100%;padding:10px 12px;border-radius:7px;border:1px solid #475569;
                background:#0f172a;color:#f1f5f9;font-size:14px;margin-bottom:6px;box-sizing:border-box;">
-      <div style="font-size:11px;color:#64748b;margin-bottom:16px;">
+      <div style="font-size:11px;color:#64748b;margin-bottom:14px;">
         Shop name appears above Shop Profit in the profile dropdown.
       </div>
+      <label style="display:block;font-size:12px;color:#cbd5e1;margin-bottom:5px;">Reading pet name</label>
+      <input id="darthy-setup-read" type="text" placeholder="Books pet" maxlength="20"
+        style="width:100%;padding:10px 12px;border-radius:7px;border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:14px;margin-bottom:12px;box-sizing:border-box;">
+      <label style="display:block;font-size:12px;color:#cbd5e1;margin-bottom:5px;">Gourmet Club pet name</label>
+      <input id="darthy-setup-food" type="text" placeholder="Gourmet pet" maxlength="20"
+        style="width:100%;padding:10px 12px;border-radius:7px;border:1px solid #475569;background:#0f172a;color:#f1f5f9;font-size:14px;margin-bottom:16px;box-sizing:border-box;">
 
       <div id="darthy-setup-error" style="display:none;color:#f87171;font-size:12px;margin-bottom:10px;"></div>
 
@@ -100,6 +160,8 @@
 
       GM_setValue(PET_KEY, pet);
       GM_setValue(SHOP_KEY, shop || '');
+      GM_setValue('darthy_read_pet', (document.getElementById('darthy-setup-read').value || '').trim());
+      GM_setValue('darthy_gourmet_pet', (document.getElementById('darthy-setup-food').value || '').trim());
       GM_setValue(SETUP_DONE_KEY, true);
 
       overlay.remove();
@@ -129,6 +191,7 @@
       // Small delay so page is settled
       setTimeout(() => {
         if (needsSetup()) showModal();
+        else if (needsCompletionPets()) showCompletionPets();
       }, 1200);
     },
     show: showModal // allow re-open from options later if needed
