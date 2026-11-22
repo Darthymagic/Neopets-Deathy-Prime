@@ -1,1 +1,0 @@
-Unzip, then Load unpacked on the folder with manifest.json.
