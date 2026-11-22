@@ -17,6 +17,7 @@ A Chrome extension for Neopets (also works in Edge, Brave, and Opera).
 - Shop Mimic
 - Home Pets Grid
 - Sidebar (stats, NP, and today’s log)
+- FC Module
 
 ## Installation (Chrome / Edge / Brave / Opera)
 
